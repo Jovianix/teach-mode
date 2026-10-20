@@ -1,0 +1,13 @@
+{
+  "name": "teach-mode-distribution",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "teach-mode"
+  ],
+  "scripts": {
+    "build": "npm run build -w @memmy/teach-mode-plugin",
+    "test": "npm run test -w @memmy/teach-mode-plugin",
+    "serve": "node scripts/registry-server.mjs"
+  }
+}
