@@ -1,0 +1,11 @@
+import path from "node:path";
+import fs from "node:fs";
+import { downloadPinned, extractPinned } from "./pinned-artifacts.mjs";
+const requireInput = name => { const value = process.env[name]; if (!value) throw new Error(`Required acceptance input is missing: ${name}`); return value; };
+const root = path.resolve(".cache/conformance-inputs");
+const host = await downloadPinned(requireInput("MEMMY_HOST_KIT_URL"), requireInput("MEMMY_HOST_KIT_SHA256"), path.join(root, "host.zip"));
+const plugin = await downloadPinned(requireInput("MEMMY_PLUGIN_ZIP_URL"), requireInput("MEMMY_PLUGIN_SHA256"), path.join(root, "plugin.zip"));
+const kit = await extractPinned(host, path.join(root, "host"));
+const variables = { MEMMY_HOST_KIT_DIR: kit, MEMMY_PLUGIN_ZIP: plugin };
+if (process.env.GITHUB_ENV) fs.appendFileSync(process.env.GITHUB_ENV, Object.entries(variables).map(([key, value]) => `${key}=${value}`).join("\n") + "\n");
+console.log(JSON.stringify(variables));

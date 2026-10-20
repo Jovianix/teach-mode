@@ -3,6 +3,8 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+permissions:
+  contents: read
 jobs:
   verify:
     strategy:
@@ -23,3 +25,4 @@ jobs:
         with:
           name: teach-mode-${{ matrix.os }}
           path: releases/
+          if-no-files-found: error

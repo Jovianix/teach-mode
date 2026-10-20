@@ -7,7 +7,10 @@
   ],
   "scripts": {
     "build": "npm run build -w @memmy/teach-mode-plugin",
-    "test": "npm run test -w @memmy/teach-mode-plugin",
-    "serve": "node scripts/registry-server.mjs"
+    "test": "node --test scripts/tests/*.test.mjs && npm run test -w @memmy/teach-mode-plugin",
+    "serve": "node scripts/registry-server.mjs",
+    "test:conformance": "node scripts/run-conformance.mjs",
+    "verify:release": "node scripts/verify-release.mjs",
+    "verify:registry": "node scripts/verify-registry.mjs"
   }
 }

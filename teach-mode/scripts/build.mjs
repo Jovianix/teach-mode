@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import { readFile, writeFile, mkdir, rm, cp, readdir } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { validateHostRelease } from "../../scripts/release-validation.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url)), require = createRequire(import.meta.url);
 const manifest = JSON.parse(await readFile(join(root, "plugin.json"), "utf8"));
@@ -15,13 +16,10 @@ const descriptorPath = process.env.MEMMY_HOST_RELEASE_DESCRIPTOR;
 let hostRelease;
 if (descriptorPath) {
   hostRelease = JSON.parse(await readFile(descriptorPath, "utf8"));
-  if (hostRelease.schema !== "memmy.plugin-host-release/v1" || !/^[a-f0-9]{40}$/.test(hostRelease.sourceCommit)
-    || !Array.isArray(hostRelease.capabilities) || !manifest.requiredHostCapabilities.every(feature => hostRelease.capabilities.includes(feature))) {
-    throw new Error("A compatible, traceable Host release descriptor is required");
-  }
+  validateHostRelease(hostRelease, manifest.requiredHostCapabilities, process.env.MEMMY_PLUGIN_RELEASE === "1");
   manifest.minimumHostVersion = hostRelease.version;
 }
-if (process.env.MEMMY_PLUGIN_RELEASE === "1" && (!hostRelease || hostRelease.dirty || dirty)) {
+if (process.env.MEMMY_PLUGIN_RELEASE === "1" && (!hostRelease || dirty)) {
   throw new Error("Publishing requires a clean plugin commit and a released Host descriptor");
 }
 
@@ -47,13 +45,15 @@ await addTree(dist, "dist"); await addTree(join(root, "skills"), "skills");
 if (manifest.ui) await addTree(join(root, "ui"), "ui");
 await addTree(dirname(require.resolve("playwright-core/package.json")), "node_modules/playwright-core");
 const output = join(root, "..", "releases"); await mkdir(output, { recursive: true });
+// JSZip creates parent directory entries internally; normalize those dates too.
+for (const entry of Object.values(zip.files)) entry.date = new Date("1980-01-01T00:00:00Z");
 const file = `${manifest.id}-${manifest.version}.zip`, bytes = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
 if (bytes.length > 50 * 1024 * 1024 || Object.keys(zip.files).length > 2000) throw new Error("Plugin exceeds Host archive limits");
 const sha256 = createHash("sha256").update(bytes).digest("hex");
 await writeFile(join(output, file), bytes);
 await writeFile(join(output, `${manifest.id}-${manifest.version}.release.json`), JSON.stringify({ manifest,
   artifact: { url: `/artifacts/${file}`, sha256 }, nativeExecutionAllowed: true,
-  sourceCommit, dirty, hostRelease: hostRelease ?? null, publishable: !dirty && Boolean(hostRelease && !hostRelease.dirty) }, null, 2));
+  sourceCommit, dirty, hostRelease: hostRelease ?? null, publishable: !dirty && hostRelease?.dirty === false && Boolean(hostRelease.release) }, null, 2));
 await writeFile(join(output, "catalog.json"), JSON.stringify([{ id: manifest.id, name: manifest.name, description: manifest.description,
   version: manifest.version, platforms: manifest.platforms, minimumHostVersion: manifest.minimumHostVersion,
   installMode: manifest.installMode, updateMode: manifest.updateMode }], null, 2));

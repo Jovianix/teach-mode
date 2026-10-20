@@ -1,0 +1,46 @@
+name: Pinned Host and plugin conformance
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        type: choice
+        options: [ubuntu-latest, windows-latest]
+        default: ubuntu-latest
+      host_kit_url:
+        required: true
+        type: string
+      host_kit_sha256:
+        required: true
+        type: string
+      plugin_zip_url:
+        required: true
+        type: string
+      plugin_zip_sha256:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  conformance:
+    runs-on: ${{ inputs.runner }}
+    env:
+      MEMMY_HOST_KIT_URL: ${{ inputs.host_kit_url }}
+      MEMMY_HOST_KIT_SHA256: ${{ inputs.host_kit_sha256 }}
+      MEMMY_PLUGIN_ZIP_URL: ${{ inputs.plugin_zip_url }}
+      MEMMY_PLUGIN_SHA256: ${{ inputs.plugin_zip_sha256 }}
+      MEMMY_ARTIFACT_READ_TOKEN: ${{ secrets.HOST_ARTIFACT_READ_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: node scripts/download-conformance-inputs.mjs
+      - run: npm run test:conformance
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: conformance-${{ inputs.runner }}
+          path: .cache/conformance-report.json
+          if-no-files-found: error
