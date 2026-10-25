@@ -25,16 +25,24 @@ export const acceptanceChecks = ["anonymousInstall", "permissionDenied", "downlo
   "historyIntentPreserved", "otherRecorderExcluded", "cancelCleanup", "workerCrashCleanup", "hostCrashCleanup",
   "disableCleanup", "uninstallCleanup", "migrationPreservesBackup", "reinstallRestoresSkills", "busyUpdateDeferred", "failedUpdateRollback"];
 
-/** Gate publication on retained evidence from the actual Windows application. Fixture conformance is separate. */
-export function validateWindowsAcceptance(reportFile, release) {
+export const macAcceptanceChecks = [...acceptanceChecks, "macPermissionsDenied", "macPermissionRecovery", "macAppAgentRestart"];
+
+export function validateWindowsAcceptance(reportFile, release) { return validateDesktopAcceptance(reportFile, release, "win32"); }
+export function validateMacAcceptance(reportFile, release) { return validateDesktopAcceptance(reportFile, release, "darwin"); }
+
+/** Real desktop evidence is required for each advertised platform, independently of fixture conformance. */
+function validateDesktopAcceptance(reportFile, release, platform) {
+  const mac = platform === "darwin", label = mac ? "macOS" : "Windows";
   const report = JSON.parse(fs.readFileSync(reportFile, "utf8"));
-  requireValue(report.schema === "memmy.teach-mode-windows-acceptance/v1" && report.status === "passed", "Real Windows acceptance has not passed");
-  requireValue(report.platform?.os === "win32" && report.platform.arch === "x64" && report.runtime?.bundledHostNode === true
-    && report.runtime.systemNodeInstalled === false && report.runtime.installedApplication === true, "Acceptance must use the installed Windows Host without system Node");
+  requireValue(report.schema === `memmy.teach-mode-${mac ? "macos" : "windows"}-acceptance/v1` && report.status === "passed", `Real ${label} acceptance has not passed`);
+  requireValue(report.platform?.os === platform && (mac ? ["arm64", "x64"].includes(report.platform.arch) : report.platform.arch === "x64")
+    && report.runtime?.bundledHostNode === true && report.runtime.systemNodeInstalled === false && report.runtime.installedApplication === true,
+    `Acceptance must use the installed ${label} Host without system Node`);
+  if (mac) requireValue(report.runtime.nativeAppAgent === true, "macOS acceptance must use the installed app-agent permission identity");
   requireValue(report.host?.version === release.hostRelease?.version && report.host?.sourceCommit === release.hostRelease?.sourceCommit
     && report.plugin?.version === release.manifest.version && report.plugin?.sourceCommit === release.sourceCommit
     && report.plugin?.sha256 === release.artifact.sha256, "Acceptance versions and hashes do not match the release artifacts");
-  requireValue(acceptanceChecks.every(check => report.checks?.[check] === true), "The Windows acceptance matrix is incomplete");
+  requireValue((mac ? macAcceptanceChecks : acceptanceChecks).every(check => report.checks?.[check] === true), `The ${label} acceptance matrix is incomplete`);
   const root = fs.realpathSync(path.dirname(reportFile));
   const evidence = new Map();
   for (const entry of report.evidence ?? []) {

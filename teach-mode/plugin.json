@@ -2,12 +2,13 @@
   "apiVersion": "memmy/v1",
   "id": "teach-mode",
   "name": "Teach Mode",
-  "version": "0.3.0",
+  "version": "0.4.1",
   "description": "在当前对话中录制已授权的电脑操作事件，结束后按需调用 Skill Creator 生成可复用技能。",
   "platforms": [
-    "win32"
+    "win32",
+    "darwin"
   ],
-  "minimumHostVersion": "1.2.3-rc.8",
+  "minimumHostVersion": "1.2.4",
   "installMode": "manual",
   "updateMode": "automatic",
   "runtime": {
@@ -52,7 +53,7 @@
     {
       "id": "record_and_replay",
       "name": "Record and Replay",
-      "description": "在当前对话开始、查询、结束或取消事件录制。仅唤起不开始；用户明确要求开始并说明采集范围后用 consent=true。复用已授权 Computer History 事件，任意应用，不要求视频。结束后等待用户另行请求生成技能。",
+      "description": "在当前对话开始、查询、结束或取消事件录制。仅唤起不开始；用户明确要求开始并说明采集范围后用 consent=true。复用已授权 Computer History 事件，任意应用，不要求视频。结束后等待用户另行请求生成技能。 浏览器教学先用 browser-options 查询连接，再用 browser 创建沿用日常登录态的新教学窗口；仅该窗口及其弹窗纳入，原有窗口不纳入。",
       "execution": "request",
       "inputSchema": {
         "type": "object",
@@ -64,7 +65,8 @@
               "start",
               "stop",
               "cancel",
-              "read"
+              "read",
+              "browser-options"
             ]
           },
           "session_id": {
@@ -86,6 +88,26 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 100
+          },
+          "browser": {
+            "type": "object",
+            "description": "仅在用户同意录制浏览器教学窗口时传入；省略则保持原有桌面事件录制。",
+            "properties": {
+              "name": {
+                "enum": [
+                  "chrome",
+                  "edge"
+                ]
+              },
+              "connection_id": {
+                "type": "string",
+                "description": "多个浏览器资料连接时，使用用户在对话中选择的 browser-options 连接。"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -188,6 +210,22 @@
                     },
                     "confirmedByUser": {
                       "type": "boolean"
+                    },
+                    "evidenceStatus": {
+                      "enum": [
+                        "observed",
+                        "context-only",
+                        "user-specified",
+                        "unverified"
+                      ]
+                    },
+                    "controlType": {
+                      "enum": [
+                        "text",
+                        "date-time",
+                        "select",
+                        "other"
+                      ]
                     }
                   },
                   "required": [
@@ -219,6 +257,66 @@
                   "type": "string",
                   "minLength": 1
                 }
+              },
+              "teachingGaps": {
+                "type": "array",
+                "maxItems": 100,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "description": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    },
+                    "stepIndexes": {
+                      "type": "array",
+                      "maxItems": 100,
+                      "items": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "reason": {
+                      "enum": [
+                        "action-not-observed",
+                        "parameter-not-observed",
+                        "result-not-observed",
+                        "unsupported-control",
+                        "capture-gap",
+                        "unverified-step"
+                      ]
+                    },
+                    "resolution": {
+                      "enum": [
+                        "needs-demonstration",
+                        "user-specified",
+                        "needs-validation"
+                      ]
+                    },
+                    "nextAction": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    }
+                  },
+                  "required": [
+                    "description",
+                    "stepIndexes",
+                    "reason",
+                    "resolution",
+                    "nextAction"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "executionMode": {
+                "type": "string",
+                "enum": [
+                  "agent-tools",
+                  "desktop"
+                ],
+                "description": "Use desktop when live native application UI is part of the workflow; declare managed Computer Use tools. exec is not a UI-input fallback."
               }
             },
             "required": [
@@ -247,7 +345,7 @@
     {
       "id": "teach_session",
       "name": "运行旧版教学技能",
-      "description": "兼容已保存的 0.1 版网页到记事本技能；只在用户明确要求执行此类旧技能时使用。",
+      "description": "仅 Windows：兼容已保存的 0.1 版网页到记事本技能；只在用户明确要求执行此类旧技能时使用。macOS 请使用对话式 Record and Replay 与 Skill Creator。",
       "execution": "job",
       "inputSchema": {
         "type": "object",
@@ -332,6 +430,15 @@
     "memmy.host-service/v1",
     "memmy.event-sessions/v1",
     "memmy.generated-skills/v1",
-    "memmy.conversation/v1"
-  ]
+    "memmy.conversation/v1",
+    "memmy.event-checkpoints/v1"
+  ],
+  "rules": {
+    "distribution": "public",
+    "installation": "manual",
+    "requiresLogin": false,
+    "unavailableVisibility": "visible",
+    "autoUpdate": true,
+    "recommendsOfficialModel": false
+  }
 }

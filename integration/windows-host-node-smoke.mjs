@@ -22,7 +22,7 @@ let subscribers = 0, downloads = 0, harness;
 const release = { manifest, artifact: { url: "/plugin.zip", sha256: hash }, nativeExecutionAllowed: true };
 const registry = createServer((request, response) => {
   if (request.url.startsWith("/api/v1/plugins/teach-mode")) return response.end(JSON.stringify(release));
-  if (request.url.startsWith("/api/v1/plugins/catalog")) return response.end("[]");
+  if (request.url.startsWith("/api/v1/plugins")) return response.end("[]");
   downloads++; response.end(bytes);
 });
 await new Promise(resolve => registry.listen(0, "127.0.0.1", resolve));

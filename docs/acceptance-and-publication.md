@@ -7,7 +7,7 @@
 ```sh
 MEMMY_HOST_KIT_URL=https://.../plugin-host-conformance-1.2.3-rc.8.zip \
 MEMMY_HOST_KIT_SHA256=<固定哈希> \
-MEMMY_PLUGIN_ZIP_URL=https://.../teach-mode-0.3.0.zip \
+MEMMY_PLUGIN_ZIP_URL=https://.../teach-mode-0.4.0.zip \
 MEMMY_PLUGIN_SHA256=<固定哈希> \
 node scripts/download-conformance-inputs.mjs
 npm run test:conformance
@@ -53,8 +53,8 @@ npm run test:conformance
 ## 发布顺序
 
 1. Host PR 通过兼容验收并发布正式版本。Host 的 release.published 工作流读取 GitHub 实际 release 与标签提交，生成 `host-release.json`；开发包的 release 为 null。
-2. 提交插件全部源码，固定标签 `v0.3.0`。构建时提供已发布 Host 描述，`MEMMY_PLUGIN_RELEASE=1 npm run build`。同一提交和描述会产生固定 ZIP；开发包不冒充正式发布。
-3. 在测试机完成上述真实验收，打包证据。触发 `publish.yml`，输入固定 Host kit 与 Windows 证据 ZIP 的 HTTPS URL 和 SHA-256。流水线重新构建、校验全部证据、运行跨仓测试，再发布已经存在且匹配源码的标签。证据缺失时不会发布。
+2. 提交插件全部源码，固定标签 `v0.4.0`。构建时提供已发布 Host 描述，`MEMMY_PLUGIN_RELEASE=1 npm run build`。同一提交和描述会产生固定 ZIP；开发包不冒充正式发布。
+3. 在各平台完成真实验收，打包证据。触发 `publish.yml`，输入固定 Host kit、Windows 与 Mac 证据 ZIP 的 HTTPS URL 和 SHA-256。流水线重新构建、核验、运行跨仓测试，再发布匹配源码的标签。证据缺失时不会发布；Mac 格式见 [macOS Teach Mode](macos-teach-mode.md)。
 4. 通过实际云服务的发布入口上传 ZIP、版本描述和 catalog；可信官方 Registry 允许该原生版本。该仓库不虚构云端写入 API。配置 `MEMMY_PLUGIN_REGISTRY_URL` 后运行 `npm run verify:registry`，匿名回读 catalog、来源提交、下载及哈希。
 
-首次安装为手动，后续自动更新。云端写入权限、GitHub 凭据、Host 正式发布和真实 Windows 证据属于实际发布前置条件；本地构建成功不能替代。
+首次安装为手动，后续自动更新。云端写入权限、GitHub 凭据、Host 正式发布和真实 Windows/Mac 证据属于实际发布前置条件；本地构建成功不能替代。

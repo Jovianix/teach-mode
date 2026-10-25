@@ -15,6 +15,13 @@ on:
       windows_acceptance_sha256:
         type: string
         required: true
+      macos_acceptance_url:
+        description: ZIP containing report.json and retained real macOS app-agent evidence
+        type: string
+        required: true
+      macos_acceptance_sha256:
+        type: string
+        required: true
 permissions:
   contents: write
 jobs:
@@ -25,6 +32,8 @@ jobs:
       MEMMY_HOST_KIT_SHA256: ${{ inputs.host_kit_sha256 }}
       MEMMY_WINDOWS_ACCEPTANCE_URL: ${{ inputs.windows_acceptance_url }}
       MEMMY_WINDOWS_ACCEPTANCE_SHA256: ${{ inputs.windows_acceptance_sha256 }}
+      MEMMY_MACOS_ACCEPTANCE_URL: ${{ inputs.macos_acceptance_url }}
+      MEMMY_MACOS_ACCEPTANCE_SHA256: ${{ inputs.macos_acceptance_sha256 }}
       MEMMY_ARTIFACT_READ_TOKEN: ${{ secrets.HOST_ARTIFACT_READ_TOKEN }}
     steps:
       - uses: actions/checkout@v4
@@ -42,11 +51,11 @@ jobs:
           MEMMY_PLUGIN_RELEASE: '1'
       - run: npm run verify:release
       - name: Pin and verify the built artifact
-        run: node -e "const fs=require('node:fs'); const release=JSON.parse(fs.readFileSync('releases/teach-mode-0.3.0.release.json')); fs.appendFileSync(process.env.GITHUB_ENV, 'MEMMY_PLUGIN_SHA256='+release.artifact.sha256+'\n')"
+        run: node -e "const fs=require('node:fs'); const release=JSON.parse(fs.readFileSync('releases/teach-mode-0.4.1.release.json')); fs.appendFileSync(process.env.GITHUB_ENV, 'MEMMY_PLUGIN_SHA256='+release.artifact.sha256+'\n')"
       - run: npm run test:conformance
       - name: Publish the already verified source tag
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          test "$(git rev-list -n 1 v0.3.0)" = "$(git rev-parse HEAD)"
-          gh release create v0.3.0 releases/teach-mode-0.3.0.zip releases/teach-mode-0.3.0.release.json releases/catalog.json .cache/conformance-report.json --verify-tag --title "Teach Mode 0.3.0" --notes-file docs/release-notes-0.3.0.md
+          test "$(git rev-list -n 1 v0.4.1)" = "$(git rev-parse HEAD)"
+          gh release create v0.4.1 releases/teach-mode-0.4.1.zip releases/teach-mode-0.4.1.release.json releases/catalog.json .cache/conformance-report.json --verify-tag --title "Teach Mode 0.4.1" --notes-file docs/release-notes-0.4.1.md

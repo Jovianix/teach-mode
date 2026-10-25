@@ -4,7 +4,7 @@ on:
     inputs:
       runner:
         type: choice
-        options: [ubuntu-latest, windows-latest]
+        options: [ubuntu-latest, windows-latest, macos-latest]
         default: ubuntu-latest
       host_kit_url:
         required: true

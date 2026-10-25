@@ -33,8 +33,7 @@ async function fixture(t, behavior = {}) {
   const release = { manifest, artifact: { url: `/artifacts/teach-mode-${manifest.version}.zip`, sha256 }, nativeExecutionAllowed: true };
   const registry = createServer((request, response) => {
     const url = new URL(request.url, "http://fixture.local");
-    if (url.pathname === "/api/v1/plugins/catalog") return response.end(JSON.stringify([{ id: manifest.id, name: manifest.name, description: manifest.description,
-      version: manifest.version, platforms: manifest.platforms, minimumHostVersion: manifest.minimumHostVersion, installMode: "manual", updateMode: "automatic" }]));
+    if (url.pathname === "/api/v1/plugins") return response.end(JSON.stringify([manifest]));
     if (url.pathname === "/api/v1/plugins/teach-mode") return response.end(JSON.stringify(release));
     downloads++;
     if (behavior.downloadFailure) return response.writeHead(503).end();
@@ -43,10 +42,11 @@ async function fixture(t, behavior = {}) {
   await new Promise(resolve => registry.listen(0, "127.0.0.1", resolve));
   let harness;
   t.after(async () => { if (harness) await harness.close(); await new Promise(resolve => registry.close(resolve)); fs.rmSync(root, { recursive: true, force: true }); });
-  harness = kit.createPluginHostHarness({ root, registryUrl: `http://127.0.0.1:${registry.address().port}`, platform: "win32",
+  harness = kit.createPluginHostHarness({ root, registryUrl: `http://127.0.0.1:${registry.address().port}`, platform: behavior.platform ?? (process.platform === "darwin" ? "darwin" : "win32"),
+    browser: behavior.browser, availableTools: behavior.availableTools,
     source: { async acquireEventCapture() {
       subscribers++; let released = false;
-      return { checkpoint: async () => ({ running: !released, complete: true, limitations: ["Controlled conformance events; not a real Windows recording"],
+      return { checkpoint: async () => ({ running: !released, complete: true, limitations: ["Controlled conformance events; not a real desktop recording"],
         streams: [{ id: "fixture", file: stream, size: fs.statSync(stream).size }] }),
         async release() { if (!released) { released = true; subscribers--; } } };
     } } });
@@ -67,6 +67,40 @@ const draft = { name: "recorded-note", description: "Save the user requested not
   parameters: [{ name: "note", description: "The requested note" }], steps: [{ instruction: "Write the requested note using write_file", evidenceIndexes: [0] }],
   tools: ["write_file", "read_file"], completionChecks: ["Read and compare the actual file"], limitations: [] };
 
+for (const platform of ["win32", "darwin"]) test(`${platform} browser-only session travels through the downloaded MCP worker without acquiring desktop History`, async t => {
+  let stream, subscribers = 0;
+  const browser = {
+    profiles: () => ({ profiles: [{ browser: "edge", connectionId: "work-profile", supported: true, windows: [] }] }),
+    async acquire({ directory, sessionId, request }) {
+      assert.deepEqual(request, { name: "edge", connection_id: "work-profile" }); subscribers++;
+      stream = path.join(directory, "browser-source.jsonl"); fs.writeFileSync(stream, "");
+      let released = false;
+      return { browserCapture: { browser: "edge", windowId: 20, scope: "teaching-window-and-popups" },
+        checkpoint: async () => ({ running: !released, complete: true, rangeEvaluated: true, boundaryConfirmed: true,
+          streams: [{ id: `browser:${sessionId}`, file: stream, size: fs.statSync(stream).size }], limitations: ["Controlled browser source for MCP contract verification"] }),
+        async release() { if (!released) { released = true; subscribers--; } } };
+    },
+  };
+  const tools = ["browser_snapshot", "browser_click", "browser_type"];
+  const f = await fixture(t, { platform, browser, availableTools: tools }); await f.install();
+  const options = await f.invoke("record_and_replay", { action: "browser-options" });
+  assert.equal(options.profiles[0].connectionId, "work-profile");
+  const session = await f.invoke("record_and_replay", { action: "start", goal: "Search the demonstrated website", consent: true,
+    browser: { name: "edge", connection_id: "work-profile" } });
+  assert.equal(session.browserCapture.windowId, 20); assert.equal(f.subscribers(), 0); assert.equal(subscribers, 1);
+  fs.appendFileSync(stream, JSON.stringify({ recordType: "human_event", sequence: 1, eventType: "text_input", timestamp: new Date().toISOString(),
+    application: { name: "Microsoft Edge" }, details: { text: "Recorded search" } }) + "\n");
+  const ended = await f.invoke("record_and_replay", { action: "stop", session_id: session.id });
+  assert.equal(ended.availability, "available"); assert.equal(ended.eventCount, 1); assert.equal(subscribers, 0);
+  const preparation = await f.invoke("create_skill", { action: "prepare", session_id: session.id });
+  assert.deepEqual(preparation.availableTools, tools); assert.equal(preparation.events[0].event.details.text, "Recorded search");
+  const generated = await f.invoke("create_skill", { action: "save", session_id: session.id, events_sha256: ended.eventsSha256, generate: true,
+    draft: { ...draft, name: "browser-search", description: "Search a website with the demonstrated input and verify the results", goal: "Search the requested topic",
+      tools, steps: [{ instruction: "Use browser_type to enter the current topic in the demonstrated search field", evidenceIndexes: [0] }],
+      completionChecks: ["Read the resulting page using browser_snapshot and verify the requested topic"] } });
+  assert.equal(generated.saved, true); assert.equal(generated.execution, "not_run");
+});
+
 test("anonymous install and repeated clicks retain permission approval and one download", async t => {
   const f = await fixture(t);
   assert.equal(f.store.repositories.accountSession.get().authenticated, false);
@@ -75,7 +109,8 @@ test("anonymous install and repeated clicks retain permission approval and one d
   await assert.rejects(f.plugins.enable(manifest.id), /permission/i);
   await f.plugins.approvePermissions(manifest.id, []); await assert.rejects(f.plugins.enable(manifest.id), /permission/i);
   await f.plugins.approvePermissions(manifest.id, manifest.permissions); await f.plugins.enable(manifest.id);
-  assert.equal((await f.invoke("teach_session", { action: "list" })).sessions.length, 0);
+  if (process.platform === "win32") assert.equal((await f.invoke("teach_session", { action: "list" })).sessions.length, 0);
+  else await assert.rejects(f.invoke("teach_session", { action: "list" }), /require Windows/);
   assert.equal(f.subscribers(), 0, "Loading the plugin must not start recording");
 });
 
@@ -85,7 +120,7 @@ test("recording and generation are separate, conversation scoped, and use the ac
   const first = await f.invoke("record_and_replay", { action: "start", goal: "Save a note", consent: true }, "websocket:chat-a");
   const second = await f.invoke("record_and_replay", { action: "start", goal: "Another note", consent: true }, "chat-b");
   assert.equal(first.conversationId, "chat-a"); assert.equal(f.subscribers(), 2);
-  await assert.rejects(f.plugins.update(manifest.id, "0.3.1"), /deferred|recording|executing/i);
+  await assert.rejects(f.plugins.update(manifest.id, "0.4.1"), /deferred|recording|executing/i);
   f.append("Recorded example note");
   const ended = await f.invoke("record_and_replay", { action: "stop", session_id: first.id });
   assert.equal(ended.state, "ready"); assert.equal(ended.eventCount, 1); assert.equal(f.subscribers(), 1);
@@ -117,4 +152,20 @@ test("disable and uninstall release active captures, withdraw contributions, and
 
 for (const behavior of [{ downloadFailure: true }, { corrupt: true }]) test(`failed download or checksum leaves no installed plugin: ${JSON.stringify(behavior)}`, async t => {
   const f = await fixture(t, behavior); await assert.rejects(f.plugins.install(manifest.id)); assert.equal(f.plugins.list().length, 0); assert.equal(f.subscribers(), 0);
+});
+
+test("macOS Host installs the declared package, records a fragment and saves a user skill through the real MCP worker", async t => {
+  assert.ok(manifest.platforms.includes("darwin"));
+  const f = await fixture(t, { platform: "darwin" }); await f.install();
+  const active = await f.invoke("record_and_replay", { action: "start", goal: "Save a reusable Mac note", consent: true });
+  f.append("A controlled macOS example");
+  const ended = await f.invoke("record_and_replay", { action: "stop", session_id: active.id });
+  assert.equal(ended.eventCount, 1); assert.equal(f.subscribers(), 0);
+  assert.equal(f.loader.listSkills(false).some(skill => skill.name === draft.name), false);
+  const prepared = await f.invoke("create_skill", { action: "prepare", session_id: active.id });
+  assert.match(prepared.skillCreator.instructions, /# Skill Creator/);
+  const saved = await f.invoke("create_skill", { action: "save", session_id: active.id, events_sha256: ended.eventsSha256, generate: true, draft });
+  assert.equal(saved.execution, "not_run"); assert.ok(f.loader.listSkills(false).some(skill => skill.name === draft.name));
+  await f.plugins.disable(manifest.id);
+  assert.equal(f.loader.listSkills(false).some(skill => skill.name === draft.name), false);
 });

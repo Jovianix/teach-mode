@@ -18,5 +18,5 @@ if (process.env.MEMMY_PLUGIN_ZIP) {
     dirty: build.dirty, sha256: createHash("sha256").update(bytes).digest("hex") };
 }
 writeFileSync(output, JSON.stringify({ schema: "memmy.plugin-artifact-conformance/v1", status: result.status === 0 ? "passed" : "failed", host, plugin,
-  recordedAt: new Date().toISOString(), scope: "Controlled events and drafts through the actual downloaded MCP worker and baseline Host composition. Real Windows capture and model-driven conversations require separate acceptance." }, null, 2) + "\n");
+  recordedAt: new Date().toISOString(), scope: "Controlled events and drafts through the actual downloaded MCP worker and baseline Host composition, including a macOS Host fixture. Real Windows/macOS capture and model-driven conversations require separate acceptance." }, null, 2) + "\n");
 process.exitCode = result.status === 0 ? 0 : result.status || 1;

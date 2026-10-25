@@ -11,7 +11,7 @@ export function createRegistryServer(directory = root) {
       if (request.method !== "GET" && request.method !== "HEAD") { response.writeHead(405).end(); return; }
       const url = new URL(request.url, "http://registry.local");
       let file;
-      if (url.pathname === "/api/v1/plugins/catalog") file = "catalog.json";
+      if (url.pathname === "/api/v1/plugins") file = "catalog.json";
       else {
         const plugin = /^\/api\/v1\/plugins\/([a-z0-9][a-z0-9._-]{0,127})$/.exec(url.pathname);
         const artifact = /^\/artifacts\/([a-z0-9][a-z0-9._-]*\.zip)$/.exec(url.pathname);

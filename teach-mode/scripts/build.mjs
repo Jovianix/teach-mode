@@ -54,7 +54,5 @@ await writeFile(join(output, file), bytes);
 await writeFile(join(output, `${manifest.id}-${manifest.version}.release.json`), JSON.stringify({ manifest,
   artifact: { url: `/artifacts/${file}`, sha256 }, nativeExecutionAllowed: true,
   sourceCommit, dirty, hostRelease: hostRelease ?? null, publishable: !dirty && hostRelease?.dirty === false && Boolean(hostRelease.release) }, null, 2));
-await writeFile(join(output, "catalog.json"), JSON.stringify([{ id: manifest.id, name: manifest.name, description: manifest.description,
-  version: manifest.version, platforms: manifest.platforms, minimumHostVersion: manifest.minimumHostVersion,
-  installMode: manifest.installMode, updateMode: manifest.updateMode }], null, 2));
+await writeFile(join(output, "catalog.json"), JSON.stringify([manifest], null, 2));
 console.log(`${relative(process.cwd(), join(output, file))} (${bytes.length} bytes, SHA-256 ${sha256})`);
