@@ -4,7 +4,7 @@
 
 ## Host 与权限
 
-Host 版本下限为 `1.2.3-rc.8`，还必须提供清单全部 `requiredHostCapabilities`，包括 `memmy.event-checkpoints/v1`。相同预发布版本号不替代能力检查。
+Host 版本下限为 `1.2.4`，还必须提供清单全部 `requiredHostCapabilities`，包括 `memmy.event-checkpoints/v1`。相同预发布版本号不替代能力检查。
 
 Host 需同时更新 Mac 源码录制器、打包的 History kit 和 app-agent：checkpoint 经控制管道和双向 socket 到达原生 enrichment 队列，返回有序标记；归一化队列写入记录、刷盘并确认精确字节位置。插件复用 Computer History，采集器及权限由 Host 统一管理。
 
