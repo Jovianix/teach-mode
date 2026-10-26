@@ -28,6 +28,9 @@ export function migratePrototypePluginData(destination: string, legacy?: string)
       if (fs.lstatSync(file).isSymbolicLink()) throw new Error("prototype_data_symlink_refused");
       return true;
     } });
+    // macOS /var and /tmp can name the same directories as /private/var and
+    // /private/tmp. Compare canonical roots while still refusing copied links.
+    const stagedRoot = fs.realpathSync(stage);
     const sessions = path.join(stage, "event-sessions");
     if (fs.existsSync(sessions)) for (const id of fs.readdirSync(sessions)) {
       if (!/^[a-f0-9-]{36}$/.test(id)) throw new Error("prototype_session_invalid");
@@ -47,10 +50,10 @@ export function migratePrototypePluginData(destination: string, legacy?: string)
       if (!Array.isArray(entries)) throw new Error("prototype_skill_registry_invalid");
       for (const entry of entries) {
         if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(entry.name) || !entry.files?.["SKILL.md"]) throw new Error("prototype_skill_registry_invalid");
-        const relative = descendant(source, path.resolve(entry.directory));
-        verify(stage, path.join(stage, relative), entry.files);
+        const relative = descendant(source, fs.realpathSync(entry.directory));
+        verify(stagedRoot, path.join(stagedRoot, relative), entry.files);
         if (entry.checks) for (const [name, hash] of Object.entries(entry.checks)) {
-          const file = path.resolve(stage, name); descendant(stage, file);
+          const file = path.resolve(stagedRoot, name); descendant(stagedRoot, file);
           if (digest(fs.readFileSync(file)) !== hash) throw new Error("prototype_evidence_hash_mismatch");
         }
         entry.directory = path.join(destination, relative);
