@@ -10,8 +10,8 @@ Host 需同时更新 Mac 源码录制器、打包的 History kit 和 app-agent�
 
 2026-10-26 同步补充：浏览器标签移出教学窗口后立即撤销页面采集，并等待旧页面收尾；桌面录制跨十分钟分段时，在原生 checkpoint 处切换输出文件，保持同一个原生采集会话。Host、打包的 History kit 和插件应使用下列同一批开发分支。
 
-- Host：`Jovianix/memmy-agent` 的 `codex/teach-pxlin-dev`。
-- 插件：`Jovianix/teach-mode` 的 `codex/teach-mode-macos-sync-20261026`。
+- Host：`Jovianix/memmy-agent` 的 `pxlin/dev`。
+- 插件：`Jovianix/teach-mode` 的 `main`。
 
 插件的 `events` / `read_events` 支持 `view: "teaching"`，在保留原始索引和来源哈希的同时压缩重复状态；`raw` 仍可读取原始证据。
 
