@@ -3,6 +3,7 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { HostInvoker } from "./host.js";
+import { teachingEvidence } from "./teaching-evidence.js";
 
 const identifier = z.string().max(64).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 const TeachingGap = z.object({
@@ -48,6 +49,7 @@ function desktopGuidance(config: Configuration) {
 const Input = z.object({ action: z.string(), session_id: z.string().uuid().optional(), goal: z.string().optional(),
   browser: z.object({ name: z.enum(["chrome", "edge"]), connection_id: z.string().min(1).max(100).optional() }).strict().optional(),
   consent: z.boolean().optional(), offset: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(100).optional(),
+  view: z.enum(["raw", "teaching"]).optional(),
   events_sha256: z.string().regex(/^[a-f0-9]{64}$/).optional(), generate: z.boolean().optional(), draft: Draft.optional() }).strict();
 
 /** The model uses the existing Host Skill Creator; the plugin validates/saves its draft. */
@@ -177,7 +179,9 @@ export function createConversationTeachPlugin(host: HostInvoker) {
         if ((input.browser || input.action === "browser-options") && !(await configuration()).features?.includes("memmy.browser-event-sessions/v1")) {
           throw new Error("Browser teaching requires Host browser-event-sessions/v1; update the desktop app");
         }
-        const result = await host<Record<string, unknown>>("event-sessions", input);
+        const { view, ...hostInput } = input;
+        const result = await host<Record<string, unknown>>("event-sessions", hostInput);
+        if (input.action === "read" && view === "teaching") return teachingEvidence(result as { session: Session; events: unknown[]; nextOffset: number | null });
         if (input.action === "status" || input.action === "list") return { ...result, sessions: (result.sessions as unknown[]).map(present) };
         if (input.action === "stop") return { ...present(result), next: "Recording ended. Wait for the user to request Skill Creator generation; do not generate or execute automatically." };
         return result;
@@ -191,8 +195,12 @@ export function createConversationTeachPlugin(host: HostInvoker) {
           next: "Select the recording identified by the user; clarify when multiple recordings could match." };
       }
       const page = await read(input.session_id), config = await configuration();
-      return { ...page, skillCreator: config.skillCreator, availableTools: config.toolNames, desktopExecution: desktopGuidance(config), teachingReviewRequired: true,
-        next: `${page.session.availability === "partial" ? "This fragment has coverage gaps: review its limitations with the user before generation. User clarification does not change the original recording completeness. " : ""}Load the Host Skill Creator instructions and read all selected event pages. For a workflow requiring live desktop UI, set executionMode=desktop and declare the actual managed Computer Use observation/action tools from availableTools; do not substitute exec or SendKeys. If native tools are absent, report the missing dependency rather than presenting shell UI automation as usable. Classify each step's evidenceStatus as observed, context-only, user-specified, or unverified. A page navigation or nearby click does not prove a date input, dropdown selection, field reading or successful outcome. Set controlType for form inputs and list missing actions/parameters/outcomes in teachingGaps with affected stepIndexes, reason, resolution and nextAction. Existing user instructions may supply missing requirements without a new clarification; classify those as user-specified without inventing confirmedByUser. They do not make an unrecorded action observed. Save may retain unresolved gaps; report them explicitly and do not call the skill execution-validated. Generation and execution are separate.` };
+      const guidance = { skillCreator: config.skillCreator, availableTools: config.toolNames, desktopExecution: desktopGuidance(config), teachingReviewRequired: true,
+        next: `${page.session.availability === "partial" ? "This fragment has coverage gaps: review its limitations with the user and retain them explicitly. User clarification does not change recording completeness. " : ""}Follow the Host Skill Creator instructions below. The first evidence page is already included: do not read it again. If nextOffset is not null, read only subsequent pages with record_and_replay action=read, view=teaching, offset=nextOffset. Read rawRequired events via view=raw before citing them. Derive a concise draft from the recorded actions and values, cite original event indices, and save with generate=true when the user requested generation. For live desktop UI set executionMode=desktop and declare the actual managed Computer Use tools from availableTools; do not substitute exec or SendKeys. Classify steps as observed, context-only, user-specified or unverified; snapshots evidence their visible content, not an unobserved action. Keep missing actions, parameter rules and outcomes in teachingGaps. Existing user requirements need no repeated clarification. Save unresolved gaps honestly; generation and execution are separate.` };
+      // Fit the normal Host 16k-character tool-result window, including creator
+      // instructions, so the model can read evidence without unpacking a spill file.
+      const budget = Math.max(1_000, 14_500 - JSON.stringify({ ...page, events: [], ...guidance }).length - 1_000);
+      return { ...teachingEvidence(page, budget), ...guidance };
     }
   };
 }

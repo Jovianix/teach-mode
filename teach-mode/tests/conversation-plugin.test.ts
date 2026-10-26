@@ -45,6 +45,25 @@ function fixture(options: { language?: string; event?: Record<string, unknown> }
   return { root, plugin, session, config, publish, eventCall, draft, eventsSha256, save };
 }
 describe("four-step conversation teaching", () => {
+  it("prepares a compact first page and keeps default raw reads compatible with the Host", async () => {
+    const f = fixture({ event: { eventType: "text_input", details: { text: "captured", nativeSessionId: "writer diagnostic" } } });
+    const prepared = await f.plugin.invoke("create_skill", { action: "prepare", session_id: id });
+    expect(prepared).toMatchObject({ evidenceView: "teaching", session: { eventsSha256: f.eventsSha256 },
+      events: [{ index: 0, details: { text: "captured" } }] });
+    expect(prepared.next).toContain("do not read it again");
+    const raw = await f.plugin.invoke("record_and_replay", { action: "read", session_id: id });
+    expect((raw.events as any[])[0].event.details.nativeSessionId).toBe("writer diagnostic");
+    const input = { action: "read", session_id: id, view: "teaching", offset: 0, limit: 1 };
+    const manifest = JSON.parse(fs.readFileSync(new URL("../plugin.json", import.meta.url), "utf8"));
+    const schema = manifest.capabilities.find((c: { id: string }) => c.id === "record_and_replay").inputSchema;
+    expect(new AjvJsonSchemaValidator().getValidator(schema)(input).valid).toBe(true);
+    expect(await f.plugin.invoke("record_and_replay", input)).toMatchObject({ evidenceView: "teaching" });
+    expect(f.eventCall).toHaveBeenLastCalledWith({ action: "read", session_id: id, offset: 0, limit: 1 });
+    // Saving still selects immutable raw evidence, not this derived view.
+    await f.save();
+    const saved = fs.readFileSync(path.join(f.root, "generated-skills/save-a-note/references/events.jsonl"), "utf8");
+    expect(saved).toContain("writer diagnostic");
+  });
   it("reports missing desktop tools without proposing exec as native input", async () => {
     const f = fixture();
     const prepared = await f.plugin.invoke("create_skill", { action: "prepare", session_id: id });

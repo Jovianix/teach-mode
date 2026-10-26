@@ -108,6 +108,14 @@
               "name"
             ],
             "additionalProperties": false
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "raw",
+              "teaching"
+            ],
+            "description": "read 的证据视图。默认 raw 保持原始事件；teaching 提供有界精简页，保留原事件索引、脱敏和覆盖限制。"
           }
         },
         "required": [

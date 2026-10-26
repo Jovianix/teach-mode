@@ -1,6 +1,6 @@
 # macOS Teach Mode 接入与验收
 
-0.4.0 开发候选为同一 MPP ZIP 增加 `darwin`，保留 `win32`。Mac 使用当前对话中的 Record and Replay 与 Skill Creator，最低系统为 Host 原生运行时要求的 macOS 14；旧 Web → Notepad 执行仅限 Windows。
+0.4.1 开发候选为同一 MPP ZIP 增加 `darwin`，保留 `win32`。Mac 使用当前对话中的 Record and Replay 与 Skill Creator，最低系统为 Host 原生运行时要求的 macOS 14；旧 Web → Notepad 执行仅限 Windows。
 
 ## Host 与权限
 
@@ -8,7 +8,14 @@ Host 版本下限为 `1.2.3-rc.8`，还必须提供清单全部 `requiredHostCap
 
 Host 需同时更新 Mac 源码录制器、打包的 History kit 和 app-agent：checkpoint 经控制管道和双向 socket 到达原生 enrichment 队列，返回有序标记；归一化队列写入记录、刷盘并确认精确字节位置。插件复用 Computer History，采集器及权限由 Host 统一管理。
 
-按 Host 提示为实际原生应用授予“辅助功能”和必要的“输入监控”。事件录制不要求视频或屏幕录制授权；后续技能使用截图等工具时，按该工具处理权限。现有敏感输入、隐私窗口、应用与站点排除策略继续生效。
+2026-10-26 同步补充：浏览器标签移出教学窗口后立即撤销页面采集，并等待旧页面收尾；桌面录制跨十分钟分段时，在原生 checkpoint 处切换输出文件，保持同一个原生采集会话。Host、打包的 History kit 和插件应使用下列同一批开发分支。
+
+- Host：`Jovianix/memmy-agent` 的 `codex/teach-pxlin-dev`。
+- 插件：`Jovianix/teach-mode` 的 `codex/teach-mode-macos-sync-20261026`。
+
+插件的 `events` / `read_events` 支持 `view: "teaching"`，在保留原始索引和来源哈希的同时压缩重复状态；`raw` 仍可读取原始证据。
+
+按 Host 提示为实际原生应用授予“辅助功能”和必要的“输入监控”。事件录制不要求视频或屏幕录制授权；后续技能使用截图等工具时，按该工具处理权限。敏感输入过滤及应用、站点观察规则继续生效；浏览器教学拒绝隐私窗口。
 
 开发编译需要 Node 22 和 Host 项目要求的 Swift 工具链；终端用户无需额外安装 Node、Python 或 Swift。
 
@@ -29,7 +36,7 @@ npm test
 npm run build
 
 MEMMY_HOST_KIT_DIR=/path/to/macos-host-kit \
-MEMMY_PLUGIN_ZIP=/path/to/teach-mode-0.4.0.zip \
+MEMMY_PLUGIN_ZIP=/path/to/teach-mode-0.4.1.zip \
 MEMMY_PLUGIN_SHA256=<实际固定哈希> \
 npm run test:conformance
 ```
@@ -44,6 +51,8 @@ Mac CI 执行插件类型检查、测试和构建，固定制品 conformance 可
 
 - 无系统 Node 时的宿主启动；TCC 拒绝和恢复；旧 app-agent 更新识别。
 - 真实四步对话、事件、毫秒边界和持久化位置；停止不自动生成。
+- Chrome/Edge 教学标签移出后旧页面收尾、禁止继续采集；移回及快速停止时边界正确，未确认的结束仍返回不完整。
+- 桌面录制跨十分钟边界、连续操作无缺口，前后 `nativeSessionId` 相同；轮转后的完整 AX 快照、页面上下文、停止热键和后台意图恢复。
 - 真实模型生成、下一轮技能发现、另行试运行、独立核验输出。
 - 对话隔离、刷新恢复、后台意图保留、其他录制互斥、取消和崩溃清理、停用/卸载、重装与更新。
 
