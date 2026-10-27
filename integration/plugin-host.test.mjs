@@ -93,7 +93,13 @@ for (const platform of ["win32", "darwin"]) test(`${platform} browser-only sessi
   const ended = await f.invoke("record_and_replay", { action: "stop", session_id: session.id });
   assert.equal(ended.availability, "available"); assert.equal(ended.eventCount, 1); assert.equal(subscribers, 0);
   const preparation = await f.invoke("create_skill", { action: "prepare", session_id: session.id });
-  assert.deepEqual(preparation.availableTools, tools); assert.equal(preparation.events[0].event.details.text, "Recorded search");
+  assert.deepEqual(preparation.availableTools, tools);
+  assert.equal(preparation.evidenceView, "teaching");
+  assert.equal(preparation.events[0].index, 0);
+  assert.equal(preparation.events[0].details.text, "Recorded search");
+  const raw = await f.invoke("record_and_replay", { action: "read", session_id: session.id, view: "raw", offset: 0, limit: 1 });
+  assert.equal(raw.events[0].index, preparation.events[0].index);
+  assert.equal(raw.events[0].event.details.text, preparation.events[0].details.text);
   const generated = await f.invoke("create_skill", { action: "save", session_id: session.id, events_sha256: ended.eventsSha256, generate: true,
     draft: { ...draft, name: "browser-search", description: "Search a website with the demonstrated input and verify the results", goal: "Search the requested topic",
       tools, steps: [{ instruction: "Use browser_type to enter the current topic in the demonstrated search field", evidenceIndexes: [0] }],
