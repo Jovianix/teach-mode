@@ -134,13 +134,17 @@ test("recording and generation are separate, conversation scoped, and use the ac
   const first = await f.invoke("record_and_replay", { action: "start", goal: "Save a note", consent: true }, "websocket:chat-a");
   const second = await f.invoke("record_and_replay", { action: "start", goal: "Another note", consent: true }, "chat-b");
   assert.equal(first.conversationId, "chat-a"); assert.equal(f.subscribers(), 2);
-  await assert.rejects(f.plugins.update(manifest.id, manifest.version), /deferred|recording|executing/i);
+  const updating = f.plugins.update(manifest.id, manifest.version);
+  void updating.catch(() => {}); // Fixture cleanup cancels it if an earlier assertion fails.
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.plugins.get(manifest.id).update?.status, "waiting");
   f.append("Recorded example note");
   const ended = await f.invoke("record_and_replay", { action: "stop", session_id: first.id });
   assert.equal(ended.state, "ready"); assert.equal(ended.eventCount, 1); assert.equal(f.subscribers(), 1);
   assert.ok(ended.presentation.actions[0].prompt.includes(first.id)); assert.equal(f.loader.listSkills(false).some(skill => skill.name === draft.name), false);
   await assert.rejects(f.invoke("record_and_replay", { action: "read", session_id: first.id }, "chat-b"), /conversation/);
   await f.invoke("record_and_replay", { action: "cancel", session_id: second.id }, "chat-b"); assert.equal(f.subscribers(), 0);
+  await updating;
   const prepared = await f.invoke("create_skill", { action: "prepare", session_id: first.id }); assert.match(prepared.skillCreator.instructions, /# Skill Creator/);
   const saved = await f.invoke("create_skill", { action: "save", session_id: first.id, events_sha256: ended.eventsSha256, generate: true, draft });
   assert.equal(saved.saved, true); assert.equal(saved.execution, "not_run");
