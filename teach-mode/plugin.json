@@ -2,7 +2,7 @@
   "apiVersion": "memmy/v1",
   "id": "teach-mode",
   "name": "Teach Mode",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "在当前对话中录制已授权的电脑操作事件，结束后按需调用 Skill Creator 生成可复用技能。",
   "platforms": [
     "win32",
@@ -30,25 +30,12 @@
         "plugin-data",
         "artifact-host",
         "plugin-context",
-        "collector",
-        "recording",
-        "window-focus",
         "skills",
         "event-sessions"
       ],
-      "description": "按你的开始指令订阅 Computer History 已授权的事件，在本机保存录制片段和生成技能。结束录制不会自动生成或执行技能。旧版教学技能保留原有执行权限。"
+      "description": "按你的开始指令订阅 Computer History 已授权的事件，在本机保存事件片段和生成技能。结束采集不会自动生成或执行技能。"
     }
   ],
-  "configSchema": {
-    "type": "object",
-    "properties": {
-      "outputDirectory": {
-        "type": "string",
-        "minLength": 1
-      }
-    },
-    "additionalProperties": false
-  },
   "capabilities": [
     {
       "id": "record_and_replay",
@@ -349,43 +336,6 @@
       "outputSchema": {
         "type": "object"
       }
-    },
-    {
-      "id": "teach_session",
-      "name": "运行旧版教学技能",
-      "description": "仅 Windows：兼容已保存的 0.1 版网页到记事本技能；只在用户明确要求执行此类旧技能时使用。macOS 请使用对话式 Record and Replay 与 Skill Creator。",
-      "execution": "job",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "action": {
-            "enum": [
-              "list",
-              "get",
-              "run",
-              "cancel"
-            ]
-          },
-          "session_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "plan_sha256": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{64}$"
-          },
-          "consent": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "action"
-        ],
-        "additionalProperties": false
-      },
-      "outputSchema": {
-        "type": "object"
-      }
     }
   ],
   "skills": [
@@ -400,12 +350,6 @@
       "name": "Skill Creator",
       "description": "把用户指定的刚才录制操作生成可复用 skill；使用 Host Skill Creator 并校验事件、参数、工具和保存结果。",
       "entry": "skills/teach-skill-creator/SKILL.md"
-    },
-    {
-      "id": "teach-mode",
-      "name": "Teach Mode",
-      "description": "兼容旧版教学技能，或在对话中使用 Record and Replay 与 Skill Creator。",
-      "entry": "skills/teach-mode/SKILL.md"
     }
   ],
   "commands": [

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { validateHostRelease, validateWindowsAcceptance, validateMacAcceptance } from "./release-validation.mjs";
-const releaseFile = process.env.MEMMY_PLUGIN_RELEASE_FILE || "releases/teach-mode-0.4.1.release.json";
+const releaseFile = process.env.MEMMY_PLUGIN_RELEASE_FILE || "releases/teach-mode-0.5.0.release.json";
 const release = JSON.parse(fs.readFileSync(releaseFile, "utf8"));
 validateHostRelease(release.hostRelease, release.manifest.requiredHostCapabilities, true);
 if (release.dirty !== false || release.publishable !== true) throw new Error("A clean plugin and published Host are required");

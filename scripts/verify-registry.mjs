@@ -2,7 +2,7 @@ import fs from "node:fs";
 import { sha256 } from "./pinned-artifacts.mjs";
 const base = new URL(process.env.MEMMY_PLUGIN_REGISTRY_URL || "");
 if (base.protocol !== "https:") throw new Error("Published Registry verification requires HTTPS");
-const expected = JSON.parse(fs.readFileSync(process.env.MEMMY_PLUGIN_RELEASE_FILE || "releases/teach-mode-0.4.1.release.json", "utf8"));
+const expected = JSON.parse(fs.readFileSync(process.env.MEMMY_PLUGIN_RELEASE_FILE || "releases/teach-mode-0.5.0.release.json", "utf8"));
 async function read(url) {
   const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(30_000) });
   if (!response.ok) throw new Error(`Anonymous Registry read failed: HTTP ${response.status}`); return response;

@@ -51,11 +51,11 @@ jobs:
           MEMMY_PLUGIN_RELEASE: '1'
       - run: npm run verify:release
       - name: Pin and verify the built artifact
-        run: node -e "const fs=require('node:fs'); const release=JSON.parse(fs.readFileSync('releases/teach-mode-0.4.1.release.json')); fs.appendFileSync(process.env.GITHUB_ENV, 'MEMMY_PLUGIN_SHA256='+release.artifact.sha256+'\n')"
+        run: node -e "const fs=require('node:fs'); const release=JSON.parse(fs.readFileSync('releases/teach-mode-0.5.0.release.json')); fs.appendFileSync(process.env.GITHUB_ENV, 'MEMMY_PLUGIN_SHA256='+release.artifact.sha256+'\n')"
       - run: npm run test:conformance
       - name: Publish the already verified source tag
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          test "$(git rev-list -n 1 v0.4.1)" = "$(git rev-parse HEAD)"
-          gh release create v0.4.1 releases/teach-mode-0.4.1.zip releases/teach-mode-0.4.1.release.json releases/catalog.json .cache/conformance-report.json --verify-tag --title "Teach Mode 0.4.1" --notes-file docs/release-notes-0.4.1.md
+          test "$(git rev-list -n 1 v0.5.0)" = "$(git rev-parse HEAD)"
+          gh release create v0.5.0 releases/teach-mode-0.5.0.zip releases/teach-mode-0.5.0.release.json releases/catalog.json .cache/conformance-report.json --verify-tag --title "Teach Mode 0.5.0" --notes-file docs/release-notes-0.5.0.md

@@ -7,7 +7,7 @@
 ```sh
 MEMMY_HOST_KIT_URL=https://.../plugin-host-conformance-1.2.3-rc.8.zip \
 MEMMY_HOST_KIT_SHA256=<固定哈希> \
-MEMMY_PLUGIN_ZIP_URL=https://.../teach-mode-0.4.0.zip \
+MEMMY_PLUGIN_ZIP_URL=https://.../teach-mode-0.5.0.zip \
 MEMMY_PLUGIN_SHA256=<固定哈希> \
 node scripts/download-conformance-inputs.mjs
 npm run test:conformance
@@ -25,7 +25,8 @@ npm run test:conformance
 2. 在对话发送 `/teach`，核对没有采集；另发开始及范围授权。操作网页与 Notepad，留存实际事件和截图。结束后核对没有生成。
 3. 另发生成请求，由真实模型调用 `create_skill`，保存 Skill Creator 的校验与生成技能。下一轮发现技能，另发试运行请求，独立读取编辑器与输出文件，比较预期内容。
 4. 分别测试后台 History 原为运行、暂停、停止时的意图恢复；其他录制任务互斥；双对话归属隔离；刷新恢复；取消、插件崩溃、Host 崩溃、停用及卸载释放资源。
-5. 用旧版数据校验迁移和备份；停用后技能消失、重装恢复；录制期间推迟更新、更新失败回滚及新权限确认。
+5. 用旧版数据校验迁移和备份；旧 Web → Notepad 技能撤下注册并保留原文件，重装不恢复旧执行入口；事件技能停用后消失、重装恢复；采集期间推迟更新、更新失败回滚及新权限确认。
+6. 覆盖初始化、开始、停止、取消、生成、停用及退出，核对没有插件视频服务请求或视频驱动启动；结合原生进程参数和输出目录留证。另行回归 App 的用户主动录屏，权限是否已经授予不作为判定依据。
 
 将证据放在一个目录，清理账号密钥等与验收无关的信息。入口 `report.json` 使用 `memmy.teach-mode-windows-acceptance/v1`：
 
@@ -43,7 +44,7 @@ npm run test:conformance
 | capture-boundaries | JSON：source:"computer-history/native"、sessionId、startedAt、endedAt、eventCount、eventsSha256、checkpoints.start.complete / checkpoints.stop.complete。未确认完整的片段不得填 complete:true。 |
 | capture-events | 结束时固定的实际事件 JSONL，与 eventsSha256 相符。 |
 | skill | 实际生成的 SKILL.md。 |
-| execution-result | JSON：status:"passed"、userMessageId（试运行请求）、sessionId、skillSha256，以及实际执行摘要。旧版执行另留计划哈希和执行结果。 |
+| execution-result | JSON：status:"passed"、userMessageId（试运行请求）、sessionId、skillSha256，以及实际执行摘要。 |
 | output-verification | 独立核验 JSON：independent:true、editorMatches:true、expectedSha256、actualSha256，说明读取编辑器及文件的核验方式。 |
 | output-file | 实际用户输出文件，与独立核验哈希一致。 |
 | screenshot | 实际桌面及编辑器核验截图。 |
@@ -53,7 +54,7 @@ npm run test:conformance
 ## 发布顺序
 
 1. Host PR 通过兼容验收并发布正式版本。Host 的 release.published 工作流读取 GitHub 实际 release 与标签提交，生成 `host-release.json`；开发包的 release 为 null。
-2. 提交插件全部源码，固定标签 `v0.4.0`。构建时提供已发布 Host 描述，`MEMMY_PLUGIN_RELEASE=1 npm run build`。同一提交和描述会产生固定 ZIP；开发包不冒充正式发布。
+2. 提交插件全部源码，固定标签 `v0.5.0`。构建时提供已发布 Host 描述，`MEMMY_PLUGIN_RELEASE=1 npm run build`。同一提交和描述会产生固定 ZIP；开发包不冒充正式发布。
 3. 在各平台完成真实验收，打包证据。触发 `publish.yml`，输入固定 Host kit、Windows 与 Mac 证据 ZIP 的 HTTPS URL 和 SHA-256。流水线重新构建、核验、运行跨仓测试，再发布匹配源码的标签。证据缺失时不会发布；Mac 格式见 [macOS Teach Mode](macos-teach-mode.md)。
 4. 通过实际云服务的发布入口上传 ZIP、版本描述和 catalog；可信官方 Registry 允许该原生版本。该仓库不虚构云端写入 API。配置 `MEMMY_PLUGIN_REGISTRY_URL` 后运行 `npm run verify:registry`，匿名回读 catalog、来源提交、下载及哈希。
 

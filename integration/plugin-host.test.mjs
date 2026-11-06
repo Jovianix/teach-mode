@@ -25,6 +25,13 @@ if (build.dirty !== false && process.env.MEMMY_ALLOW_DIRTY_PLUGIN !== "1") throw
 assert.equal(manifest.id, "teach-mode"); assert.equal(manifest.minimumHostVersion, hostRelease.version);
 assert.ok(manifest.requiredHostCapabilities.every(feature => hostRelease.capabilities.includes(feature)));
 assert.equal(manifest.ui?.surface, undefined);
+assert.deepEqual(manifest.capabilities.map(capability => capability.id).sort(), ["create_skill", "record_and_replay"]);
+for (const permission of manifest.permissions.filter(permission => permission.type === "host-service")) {
+  assert.equal(permission.services.some(service => ["recording", "collector", "window-focus"].includes(service)), false);
+}
+for (const file of Object.keys(zip.files)) {
+  assert.doesNotMatch(file, /node_modules\/playwright-core|browser-recorder\.js|browser-guardian\.ps1|notepad-control\.ps1|^ui\//);
+}
 
 async function fixture(t, behavior = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "teach-artifact-conformance-"));
@@ -115,8 +122,9 @@ test("anonymous install and repeated clicks retain permission approval and one d
   await assert.rejects(f.plugins.enable(manifest.id), /permission/i);
   await f.plugins.approvePermissions(manifest.id, []); await assert.rejects(f.plugins.enable(manifest.id), /permission/i);
   await f.plugins.approvePermissions(manifest.id, manifest.permissions); await f.plugins.enable(manifest.id);
-  if (process.platform === "win32") assert.equal((await f.invoke("teach_session", { action: "list" })).sessions.length, 0);
-  else await assert.rejects(f.invoke("teach_session", { action: "list" }), /require Windows/);
+  assert.deepEqual(manifest.capabilities.map(capability => capability.id).sort(), ["create_skill", "record_and_replay"]);
+  await assert.rejects(f.invoke("teach_session", { action: "list" }));
+  assert.equal((await f.invoke("record_and_replay", { action: "list" })).sessions.length, 0);
   assert.equal(f.subscribers(), 0, "Loading the plugin must not start recording");
 });
 
@@ -126,7 +134,7 @@ test("recording and generation are separate, conversation scoped, and use the ac
   const first = await f.invoke("record_and_replay", { action: "start", goal: "Save a note", consent: true }, "websocket:chat-a");
   const second = await f.invoke("record_and_replay", { action: "start", goal: "Another note", consent: true }, "chat-b");
   assert.equal(first.conversationId, "chat-a"); assert.equal(f.subscribers(), 2);
-  await assert.rejects(f.plugins.update(manifest.id, "0.4.1"), /deferred|recording|executing/i);
+  await assert.rejects(f.plugins.update(manifest.id, manifest.version), /deferred|recording|executing/i);
   f.append("Recorded example note");
   const ended = await f.invoke("record_and_replay", { action: "stop", session_id: first.id });
   assert.equal(ended.state, "ready"); assert.equal(ended.eventCount, 1); assert.equal(f.subscribers(), 1);
@@ -154,6 +162,32 @@ test("disable and uninstall release active captures, withdraw contributions, and
   await f.plugins.uninstall(manifest.id); assert.equal(f.loader.listSkills(false).some(skill => skill.name === draft.name), false);
   assert.ok(fs.existsSync(path.join(f.root, "plugin-data", manifest.id, "generated-skills", draft.name, "SKILL.md")));
   await f.install(); assert.ok(f.loader.listSkills(false).some(skill => skill.name === draft.name));
+});
+
+test("initialization retires old executor registrations while retaining files and event skills through reinstall", async t => {
+  const f = await fixture(t), id = "ba1142db-f861-4dca-8bff-f602d492d8db";
+  const root = path.join(f.root, "plugin-data", manifest.id);
+  const legacy = path.join(root, id, "exports", "a".repeat(64)), current = path.join(root, "generated-skills", "retained-note");
+  fs.mkdirSync(legacy, { recursive: true }); fs.mkdirSync(current, { recursive: true });
+  const oldSkill = Buffer.from(`---\nname: teach-${id}\ndescription: Run the retired web to Notepad executor\n---\nCall teach_session.\n`);
+  const newSkill = Buffer.from("---\nname: retained-note\ndescription: Save the requested note and read back its contents\n---\nUse write_file and read_file.\n");
+  fs.writeFileSync(path.join(legacy, "SKILL.md"), oldSkill); fs.writeFileSync(path.join(current, "SKILL.md"), newSkill);
+  fs.writeFileSync(path.join(legacy, "manifest.json"), JSON.stringify({ schema: "memmy.teach-export/v2", pluginId: manifest.id,
+    sessionId: id, skillName: `teach-${id}` }));
+  fs.writeFileSync(path.join(root, "recording.mp4"), "Retained video");
+  fs.writeFileSync(path.join(root, ".generated-skills.json"), JSON.stringify([
+    { name: `teach-${id}`, directory: legacy, files: { "SKILL.md": createHash("sha256").update(oldSkill).digest("hex") } },
+    { name: "retained-note", directory: current, files: { "SKILL.md": createHash("sha256").update(newSkill).digest("hex") } },
+  ]));
+  await f.install();
+  for (const reinstall of [false, true]) {
+    if (reinstall) { await f.plugins.uninstall(manifest.id); await f.install(); }
+    const names = f.loader.listSkills(false).map(skill => skill.name);
+    assert.equal(names.includes(`teach-${id}`), false); assert.ok(names.includes("retained-note"));
+    assert.equal(fs.readFileSync(path.join(legacy, "SKILL.md")).equals(oldSkill), true);
+    assert.equal(fs.readFileSync(path.join(root, "recording.mp4"), "utf8"), "Retained video");
+    assert.equal(f.subscribers(), 0);
+  }
 });
 
 for (const behavior of [{ downloadFailure: true }, { corrupt: true }]) test(`failed download or checksum leaves no installed plugin: ${JSON.stringify(behavior)}`, async t => {

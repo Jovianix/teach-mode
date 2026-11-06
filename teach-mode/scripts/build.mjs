@@ -2,13 +2,12 @@ import { build } from "esbuild";
 import JSZip from "jszip";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { createRequire } from "node:module";
-import { readFile, writeFile, mkdir, rm, cp, readdir } from "node:fs/promises";
-import { dirname, join, relative } from "node:path";
+import { readFile, writeFile, mkdir, rm, readdir } from "node:fs/promises";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateHostRelease } from "../../scripts/release-validation.mjs";
 
-const root = fileURLToPath(new URL("..", import.meta.url)), require = createRequire(import.meta.url);
+const root = fileURLToPath(new URL("..", import.meta.url));
 const manifest = JSON.parse(await readFile(join(root, "plugin.json"), "utf8"));
 const sourceCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
 const dirty = Boolean(execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }).trim());
@@ -25,9 +24,8 @@ if (process.env.MEMMY_PLUGIN_RELEASE === "1" && (!hostRelease || dirty)) {
 
 const dist = join(root, "dist"); await rm(dist, { recursive: true, force: true }); await mkdir(dist, { recursive: true });
 await build({ absWorkingDir: root, entryPoints: ["src/index.ts"], outfile: join(dist, "index.js"), bundle: true,
-  platform: "node", target: "node22", format: "esm", external: ["playwright-core"],
+  platform: "node", target: "node22", format: "esm",
   banner: { js: "import { createRequire as __memmyCreateRequire } from 'node:module'; const require = __memmyCreateRequire(import.meta.url);" } });
-for (const file of ["browser-recorder.js", "notepad-control.ps1", "browser-guardian.ps1"]) await cp(join(root, "src", file), join(dist, file));
 const zip = new JSZip();
 const originalFile = zip.file.bind(zip);
 zip.file = (name, data, options) => originalFile(name, data, { date: new Date("1980-01-01T00:00:00Z"), ...options });
@@ -42,8 +40,6 @@ async function addTree(source, prefix) {
   }
 }
 await addTree(dist, "dist"); await addTree(join(root, "skills"), "skills");
-if (manifest.ui) await addTree(join(root, "ui"), "ui");
-await addTree(dirname(require.resolve("playwright-core/package.json")), "node_modules/playwright-core");
 const output = join(root, "..", "releases"); await mkdir(output, { recursive: true });
 // JSZip creates parent directory entries internally; normalize those dates too.
 for (const entry of Object.values(zip.files)) entry.date = new Date("1980-01-01T00:00:00Z");

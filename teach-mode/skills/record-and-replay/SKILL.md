@@ -19,8 +19,9 @@ open a separate teaching panel or require a starting URL or a particular app.
    Permission, collector and dependency errors must remain visible in chat.
    On macOS, follow the Host's Accessibility/Input Monitoring guidance for
    Memmy Computer Use.app and retry only after the user grants the missing
-   permission. Event recording does not require a video or a Screen Recording
-   grant. Preserve the user's excluded apps, sites and private-window rules.
+   permission. Teach captures structured events and does not call video recording
+   services. An existing Screen Recording grant may remain enabled. Preserve the
+   user's excluded apps, sites and private-window rules.
    For browser teaching, use `browser-options`, then `start` with
    `browser:{name:"chrome"|"edge",connection_id?:...}`. This creates a NEW
    ordinary window through the installed extension in the user's existing
@@ -56,7 +57,7 @@ open a separate teaching panel or require a starting URL or a particular app.
    `$teach-skill-creator` and the selected recording ID. Multiple candidates require
    clarification when the intended recording is ambiguous.
 
-Recording does not require video and does not promise generic desktop replay.
+Teach records structured events, without starting video capture. It does not promise generic desktop replay.
 Later execution uses the generated instructions and available Agent tools, only
 when the user requests it, with independent checks of the actual task result.
 To disable or re-enable Teach Mode, use the Host `plugin_manage` tool. Uninstall

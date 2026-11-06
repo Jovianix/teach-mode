@@ -1,6 +1,6 @@
 {
   "name": "@memmy/teach-mode-plugin",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -14,7 +14,6 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "jszip": "^3.10.1",
-    "playwright-core": "1.62.0-alpha-1783623505000",
     "zod": "^4.4.3"
   },
   "devDependencies": {

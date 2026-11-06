@@ -20,8 +20,9 @@ function fixture(options: { language?: string; event?: Record<string, unknown> }
   const session = { id, state: "ready", availability: "available", goal: "Save a note", eventCount: 1, eventsSha256,
     startedAt: "2026-10-20T00:00:00.000Z", endedAt: "2026-10-20T00:01:00.000Z", limitations: ["Only authorized observed events"] };
   const config = { version: 1, features: ["memmy.conversation/v1", "memmy.generated-skills/v1", "memmy.event-checkpoints/v1"], supported: true, toolNames: ["read_file", "write_file"], skills: [] as Array<{ name: string; path: string }>, skillCreator: { available: true, instructions: "Host Skill Creator instructions" } };
-  const publish = vi.fn(async (_input: unknown) => ({ ok: true })), eventCall = vi.fn();
+  const publish = vi.fn(async (_input: unknown) => ({ ok: true })), eventCall = vi.fn(), hostCall = vi.fn();
   const host: HostInvoker = async <T>(service: string, raw: unknown) => {
+    hostCall(service, raw);
     const input = raw as Record<string, any>; let result: unknown;
     if (service === "plugin-context") result = { dataDirectory: root, language: options.language };
     else if (service === "skills") result = await publish(input);
@@ -42,9 +43,21 @@ function fixture(options: { language?: string; event?: Record<string, unknown> }
     steps: [{ instruction: "Use write_file to write the requested note", evidenceIndexes: [0] }], tools: ["write_file", "read_file"],
     completionChecks: ["Read the actual output file and compare its text to the request"], limitations: [] };
   const save = () => plugin.invoke("create_skill", { action: "save", session_id: id, events_sha256: eventsSha256, generate: true, draft });
-  return { root, plugin, session, config, publish, eventCall, draft, eventsSha256, save };
+  return { root, plugin, session, config, publish, eventCall, hostCall, draft, eventsSha256, save };
 }
 describe("four-step conversation teaching", () => {
+  it("uses only event and skill services throughout the lifecycle and refuses retired capabilities", async () => {
+    const f = fixture(); await f.plugin.initialize();
+    for (const action of ["status", "list", "start", "stop", "cancel", "read"]) {
+      await f.plugin.invoke("record_and_replay", { action, session_id: id, goal: "Save a note", consent: true });
+    }
+    await f.plugin.invoke("create_skill", { action: "prepare", session_id: id }); await f.save();
+    for (const capability of ["teach_session", "teach_manage"]) {
+      await expect(f.plugin.invoke(capability, { action: "list" })).rejects.toThrow("Unknown Teach Mode capability");
+    }
+    await f.plugin.shutdown();
+    expect([...new Set(f.hostCall.mock.calls.map(([service]) => service))].sort()).toEqual(["event-sessions", "plugin-context", "skills"]);
+  });
   it("prepares a compact first page and keeps default raw reads compatible with the Host", async () => {
     const f = fixture({ event: { eventType: "text_input", details: { text: "captured", nativeSessionId: "writer diagnostic" } } });
     const prepared = await f.plugin.invoke("create_skill", { action: "prepare", session_id: id });

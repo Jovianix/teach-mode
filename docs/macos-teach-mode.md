@@ -1,6 +1,8 @@
 # macOS Teach Mode 接入与验收
 
-0.4.1 开发候选为同一 MPP ZIP 增加 `darwin`，保留 `win32`。Mac 使用当前对话中的 Record and Replay 与 Skill Creator，最低系统为 Host 原生运行时要求的 macOS 14；旧 Web → Notepad 执行仅限 Windows。
+0.5.0 开发候选使用同一 MPP ZIP 支持 `darwin` 与 `win32`。Mac 使用当前对话中的 Record and Replay 与 Skill Creator，最低系统为 Host 原生运行时要求的 macOS 14。旧 Web → Notepad 执行器已退役，两个平台都只使用事件教学链路。
+
+0.5.0 当前只完成阶段一源码修改。以下是后续验收要求及既有实现背景，本轮尚未执行运行测试、制品联测或真机验收。
 
 ## Host 与权限
 
@@ -17,7 +19,7 @@ Host 需同时更新 Mac 源码录制器、打包的 History kit 和 app-agent�
 
 旧原型数据迁移会先归一化真实目录，兼容 macOS `/var` 与 `/private/var` 等父目录别名；复制数据中的符号链接、目录越界及哈希不一致仍会被拒绝。此路径问题由本轮 Mac CI 定位并修复。
 
-按 Host 提示为实际原生应用授予“辅助功能”和必要的“输入监控”。事件录制不要求视频或屏幕录制授权；后续技能使用截图等工具时，按该工具处理权限。敏感输入过滤及应用、站点观察规则继续生效；浏览器教学拒绝隐私窗口。
+按 Host 提示为实际原生应用授予“辅助功能”和必要的“输入监控”。事件教学不调用视频录制服务，已授予的屏幕录制权限可以保留；后续技能使用截图等工具时，按该工具处理权限。敏感输入过滤及应用、站点观察规则继续生效；浏览器教学拒绝隐私窗口。
 
 开发编译需要 Node 22 和 Host 项目要求的 Swift 工具链；终端用户无需额外安装 Node、Python 或 Swift。
 
@@ -38,7 +40,7 @@ npm test
 npm run build
 
 MEMMY_HOST_KIT_DIR=/path/to/macos-host-kit \
-MEMMY_PLUGIN_ZIP=/path/to/teach-mode-0.4.1.zip \
+MEMMY_PLUGIN_ZIP=/path/to/teach-mode-0.5.0.zip \
 MEMMY_PLUGIN_SHA256=<实际固定哈希> \
 npm run test:conformance
 ```
@@ -62,4 +64,4 @@ Mac CI 执行插件类型检查、测试和构建，固定制品 conformance 可
 
 其余来源、证据种类及哈希沿用 [验收与发布](acceptance-and-publication.md)。`MEMMY_MACOS_ACCEPTANCE_REPORT` 指向报告；发布工作流同时要求 Windows 和 Mac 原始验收 ZIP URL 与 SHA-256，缺少任一已声明平台证据时不能通过。
 
-本轮开发环境为 Linux/WSL，未执行 Mac 原生编译、TCC 和真实桌面验收。云端接入仍暂缓，本地包及 Registry 不作为正式发布结果。
+早期开发环境为 Linux/WSL；本轮阶段一未执行 Mac 原生编译、TCC 和真实桌面验收。云端接入仍暂缓，本地包及 Registry 不作为正式发布结果。

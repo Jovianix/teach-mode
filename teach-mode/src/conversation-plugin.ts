@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { HostInvoker } from "./host.js";
 import { teachingEvidence } from "./teaching-evidence.js";
+import { retireLegacySkills } from "./legacy-skill-retirement.js";
 
 const identifier = z.string().max(64).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 const TeachingGap = z.object({
@@ -67,6 +68,9 @@ export function createConversationTeachPlugin(host: HostInvoker) {
     if (!config.supported) throw new Error("Event recording is unavailable on this Host platform");
     if (!Array.isArray(config.skills)) throw new Error("Teach Mode requires the Host skill catalog; update the desktop app");
     if (!config.skillCreator.available) throw new Error("Teach Mode requires the Host skill-creator skill");
+    // The Host restores generated contributions after this worker initializes.
+    // Withdraw retired executors first; retain their files as user evidence.
+    await retireLegacySkills(host, context.dataDirectory);
     dataDirectory = context.dataDirectory; language = context.language ?? "en-US";
   })();
   const present = (raw: unknown) => {

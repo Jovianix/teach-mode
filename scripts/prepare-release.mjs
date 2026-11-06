@@ -8,6 +8,6 @@ for (const [name, prefix] of [["host-kit", "MEMMY_HOST_KIT"], ["windows-acceptan
 }
 const values = { MEMMY_HOST_KIT_DIR: path.join(root, "host-kit"), MEMMY_HOST_RELEASE_DESCRIPTOR: path.join(root, "host-kit/host-release.json"),
   MEMMY_WINDOWS_ACCEPTANCE_REPORT: path.join(root, "windows-acceptance/report.json"),
-  MEMMY_MACOS_ACCEPTANCE_REPORT: path.join(root, "macos-acceptance/report.json"), MEMMY_PLUGIN_ZIP: path.resolve("releases/teach-mode-0.4.1.zip") };
+  MEMMY_MACOS_ACCEPTANCE_REPORT: path.join(root, "macos-acceptance/report.json"), MEMMY_PLUGIN_ZIP: path.resolve("releases/teach-mode-0.5.0.zip") };
 if (!process.env.GITHUB_ENV) throw new Error("Release preparation requires the CI environment file");
 for (const [key, value] of Object.entries(values)) fs.appendFileSync(process.env.GITHUB_ENV, `${key}=${value}\n`);
