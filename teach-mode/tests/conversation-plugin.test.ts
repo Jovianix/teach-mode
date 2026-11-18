@@ -96,7 +96,7 @@ describe("four-step conversation teaching", () => {
   it("preserves document targeting rules and native dependencies in a saved desktop skill", async () => {
     const f = fixture(), observe = "mcp_memmy_computer_use_get_app_state", type = "mcp_memmy_computer_use_type_text";
     f.config.toolNames.push(observe, type);
-    const draft = { ...f.draft, executionMode: "desktop", tools: [observe, type, "read_file"] };
+    const draft = { ...f.draft, tools: [observe, type, "read_file"] };
     const manifest = JSON.parse(fs.readFileSync(new URL("../plugin.json", import.meta.url), "utf8"));
     const validator = new AjvJsonSchemaValidator().getValidator(manifest.capabilities.find((c: { id: string }) => c.id === "create_skill").inputSchema);
     const input = { action: "save", session_id: id, events_sha256: f.eventsSha256, generate: true, draft };
@@ -105,10 +105,8 @@ describe("four-step conversation teaching", () => {
     expect(result).toMatchObject({ execution: "not_run", tools: draft.tools });
     const target = path.join(f.root, "generated-skills", draft.name);
     const markdown = fs.readFileSync(path.join(target, "SKILL.md"), "utf8");
-    expect(markdown).toContain("exact window_id");
-    expect(markdown).toContain("Do not use PowerShell SendKeys");
-    expect(markdown).toContain("A launcher PID is not proof of the target window");
-    expect(markdown).toContain("different document, is an execution failure");
+    expect(markdown).toContain("Verify the requested outcome");
+    expect(markdown).not.toMatch(/Windows Notepad|PowerShell|Independently read the requested output file/);
     expect(JSON.parse(markdown.split("metadata: ")[1]!.split("\n")[0]!).memmy.requires.tools).toEqual(draft.tools);
     expect(JSON.parse(fs.readFileSync(path.join(target, "references/source.json"), "utf8"))).toMatchObject({ executionMode: "desktop" });
     expect((await f.plugin.invoke("create_skill", { action: "prepare", session_id: id })).desktopExecution)
@@ -129,6 +127,21 @@ describe("four-step conversation teaching", () => {
       teachingReview: { status: "gaps_identified", gaps: input.draft.teachingGaps } });
     expect(validate({ ...input, draft: { ...input.draft, teachingGaps: [{ ...input.draft.teachingGaps[0], reason: "invented" }] } }).valid).toBe(false);
     expect(validate({ action: "save", session_id: id, events_sha256: f.eventsSha256, generate: true, draft: f.draft }).valid).toBe(true);
+  });
+  it("uses prepare arguments for save and advertises the same parameter-name rules as the worker", async () => {
+    const f = fixture();
+    const prepared = await f.plugin.invoke("create_skill", { action: "prepare", session_id: id });
+    expect(prepared.saveArguments).toEqual({ action: "save", session_id: id, events_sha256: f.eventsSha256 });
+    const args = { ...(prepared.saveArguments as object), draft: f.draft };
+    const manifest = JSON.parse(fs.readFileSync(new URL("../plugin.json", import.meta.url), "utf8"));
+    const validate = new AjvJsonSchemaValidator().getValidator(manifest.capabilities.find((c: { id: string }) => c.id === "create_skill").inputSchema);
+    const invalid = { ...args, draft: { ...f.draft, parameters: [{ name: "folder_name", description: "Folder" }] } };
+    expect(validate(invalid).valid).toBe(false);
+    await expect(f.plugin.invoke("create_skill", invalid)).rejects.toThrow();
+    expect(validate({ action: "save", draft: f.draft }).valid).toBe(false);
+    expect(validate(args).valid).toBe(true);
+    expect(await f.plugin.invoke("create_skill", args)).toMatchObject({ saved: true });
+    expect(fs.readFileSync(path.join(f.root, "generated-skills", f.draft.name, "SKILL.md"), "utf8")).not.toContain("Execution boundaries");
   });
   it("retains unclassified action gaps in the saved skill and published evidence", async () => {
     const f = fixture({ language: "zh-CN" }), result = await f.save();
@@ -263,8 +276,8 @@ describe("four-step conversation teaching", () => {
     expect(markdown).toContain("Read the actual output file"); expect(markdown).toContain("Only authorized observed events");
 
   });
-  it("rejects absent consent, changed evidence, missing tools and unsupported resource references", async () => {
-    const f = fixture(); await expect(f.plugin.invoke("create_skill", { action: "save", draft: f.draft })).rejects.toThrow("Explicit generation");
+  it("rejects incomplete save arguments, changed evidence, missing tools and unsupported resource references", async () => {
+    const f = fixture(); await expect(f.plugin.invoke("create_skill", { action: "save", draft: f.draft })).rejects.toThrow(/session_id/);
     await expect(f.plugin.invoke("create_skill", { action: "save", session_id: id, events_sha256: "a".repeat(64), generate: true, draft: f.draft })).rejects.toThrow("hash changed");
     f.draft.tools.push("imaginary_tool"); await expect(f.save()).rejects.toThrow("dependencies"); f.draft.tools.pop();
     f.draft.steps[0]!.instruction = "Read [missing](scripts/missing.py)"; await expect(f.save()).rejects.toThrow("unavailable resource");

@@ -17,7 +17,7 @@ const TeachingGap = z.object({
 const Draft = z.object({
   name: identifier, description: z.string().trim().min(10).max(1_000).refine(value => !/\bTODO\b|fill me in|\[TODO|[<>]/i.test(value), "Description must satisfy Host Skill Creator validation"), goal: z.string().trim().min(1).max(2_000),
   prerequisites: z.array(z.string().trim().min(1)).max(30),
-  parameters: z.array(z.object({ name: identifier, description: z.string().min(1), example: z.string().optional() })).max(30),
+  parameters: z.array(z.object({ name: identifier, description: z.string().min(1), example: z.string().optional() }).strict()).max(30),
   steps: z.array(z.object({ instruction: z.string().trim().min(1).max(4_000),
     replayInstruction: z.string().trim().min(1).max(4_000).optional(),
     evidenceIndexes: z.array(z.number().int().nonnegative()).max(100),
@@ -35,12 +35,8 @@ type Session = { id: string; state: string; availability: string; eventsSha256: 
 type Configuration = { version: number; features?: string[]; supported: boolean; toolNames: string[]; skills: Array<{ name: string; path: string }>; skillCreator: { available: boolean; instructions?: string } };
 const desktopObservation = /^mcp_(?:memmy|open)_computer_use_get_app_state$/;
 const executionRules = [
-  "For live desktop UI steps, load the Host computer-use skill and use the managed Computer Use tools. exec is for non-UI commands, not a desktop-input fallback.",
-  "Observe the intended application and document before acting. Use the current observation_id and exact window_id; confirm the requested file is the active document, not an earlier demonstration or another tab.",
-  "A launcher PID is not proof of the target window: Windows Notepad may hand the file to an existing process. Resolve the actual document through Computer Use before sending any input.",
-  "Do not use PowerShell SendKeys, WScript.Shell, SetForegroundWindow, SendInput or raw key injection to replace Computer Use. If the required native tools are unavailable, stop the affected UI steps and report the missing dependency.",
-  "Use set_value for a supported text control, or type_text with the native helper's foreground option when needed. Send literal text through the helper rather than keyboard-layout/IME-dependent SendKeys strings.",
-  "After each action, inspect fresh state. Independently read the requested output file and compare its content; an empty or wrong file, or a change to a different document, is an execution failure.",
+  "Use managed Computer Use tools for live UI. Identify the intended app and window from fresh state before acting.",
+  "Verify the requested outcome in the relevant control, page or document.",
 ];
 function desktopGuidance(config: Configuration) {
   const observationTool = config.toolNames.find(tool => desktopObservation.test(tool)) ?? null;
@@ -48,11 +44,18 @@ function desktopGuidance(config: Configuration) {
     tools: config.toolNames.filter(tool => /^mcp_(?:memmy|open)_computer_use_/.test(tool)),
     rules: executionRules };
 }
-const Input = z.object({ action: z.string(), session_id: z.string().uuid().optional(), goal: z.string().optional(),
+const RecordingInput = z.object({ action: z.string(), session_id: z.string().uuid().optional(), goal: z.string().optional(),
   browser: z.object({ name: z.enum(["chrome", "edge"]), connection_id: z.string().min(1).max(100).optional() }).strict().optional(),
   consent: z.boolean().optional(), offset: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(100).optional(),
-  view: z.enum(["raw", "teaching"]).optional(),
-  events_sha256: z.string().regex(/^[a-f0-9]{64}$/).optional(), generate: z.boolean().optional(), draft: Draft.optional() }).strict();
+  view: z.enum(["raw", "teaching"]).optional() }).strict();
+const SaveInput = z.object({
+  action: z.literal("save"), session_id: z.string().uuid(), events_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  draft: Draft, generate: z.literal(true).optional(),
+}).strict();
+const CreatorInput = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("prepare"), session_id: z.string().uuid().optional() }).strict(),
+  SaveInput,
+]);
 
 /** The model uses the existing Host Skill Creator; the plugin validates/saves its draft. */
 export function createConversationTeachPlugin(host: HostInvoker) {
@@ -89,9 +92,9 @@ export function createConversationTeachPlugin(host: HostInvoker) {
     } };
   };
   const read = (id: string, offset = 0) => host<{ session: Session; events: unknown[]; nextOffset: number | null }>("event-sessions", { action: "read", session_id: id, offset, limit: 100 });
-  async function save(input: z.infer<typeof Input>) {
-    if (input.generate !== true || !input.session_id || !input.events_sha256 || !input.draft) throw new Error("Explicit generation request, session, evidence hash and Skill Creator draft are required");
-    const draft = Draft.parse(input.draft), config = await configuration();
+  async function save(input: z.infer<typeof SaveInput>) {
+    const draft = input.draft, config = await configuration();
+    if (draft.tools.some(tool => /^mcp_(?:memmy|open)_computer_use_/.test(tool))) draft.executionMode = "desktop";
     if (!config.skillCreator.available) throw new Error("skill-creator dependency is unavailable");
     if (!config.toolNames.length) throw new Error("Host tool catalog is unavailable; cannot validate tool dependencies");
     const missing = draft.tools.filter(tool => !config.toolNames.includes(tool));
@@ -131,7 +134,7 @@ export function createConversationTeachPlugin(host: HostInvoker) {
       `metadata: ${JSON.stringify({ memmy: { requires: { tools: draft.tools } } })}`, "---", "",
       `# ${draft.name}`, "", draft.goal, "", "## Prerequisites", ...draft.prerequisites.map(value => `- ${value}`), "",
       "## Parameters", ...draft.parameters.map(parameter => `- \`${parameter.name}\`: ${parameter.description}${parameter.example ? ` (example: ${parameter.example}; replace for the current task)` : ""}`), "",
-      "## Execution boundaries", ...executionRules.map(rule => `- ${rule}`), "",
+      ...(draft.executionMode === "desktop" ? ["## Execution boundaries", ...executionRules.map(rule => `- ${rule}`), ""] : []),
       "## Procedure", ...draft.steps.map((step, index) => {
         const status = teachingReview.steps[index]!.evidenceStatus;
         const cn = language === "zh-CN";
@@ -185,8 +188,9 @@ export function createConversationTeachPlugin(host: HostInvoker) {
   return { initialize, async shutdown() { closing = true; },
     async invoke(capability: string, raw: unknown): Promise<Record<string, unknown>> {
       if (closing) throw new Error("teach_plugin_stopping");
-      await initialize(); const input = Input.parse(raw);
+      await initialize();
       if (capability === "record_and_replay") {
+        const input = RecordingInput.parse(raw);
         if (!["status", "list", "start", "stop", "cancel", "read", "browser-options"].includes(input.action)) throw new Error("Unknown event recording action");
         if ((input.browser || input.action === "browser-options") && !(await configuration()).features?.includes("memmy.browser-event-sessions/v1")) {
           throw new Error("Browser teaching requires Host browser-event-sessions/v1; update the desktop app");
@@ -199,16 +203,17 @@ export function createConversationTeachPlugin(host: HostInvoker) {
         return result;
       }
       if (capability !== "create_skill") throw new Error("Unknown Teach Mode capability");
+      const input = CreatorInput.parse(raw);
       if (input.action === "save") return save(input);
-      if (input.action !== "prepare") throw new Error("Unknown Skill Creator action");
       if (!input.session_id) {
         const { sessions } = await host<{ sessions: Session[] }>("event-sessions", { action: "list" });
         return { recordings: sessions.filter(s => s.state === "ready"), requiresSelection: true,
           next: "Select the recording identified by the user; clarify when multiple recordings could match." };
       }
       const page = await read(input.session_id), config = await configuration();
-      const guidance = { skillCreator: config.skillCreator, availableTools: config.toolNames, desktopExecution: desktopGuidance(config), teachingReviewRequired: true,
-        next: `${page.session.availability === "partial" ? "This fragment has coverage gaps: retain the capture limitations and ask only about a missing action that affects the requested workflow. User clarification does not change recording completeness. " : ""}Follow the Host Skill Creator instructions below. The first evidence page is already included: do not read it again. If nextOffset is not null, read only subsequent pages with record_and_replay action=read, view=teaching, offset=nextOffset. Read rawRequired events via view=raw before citing them. Derive a concise draft from the recorded actions and values, cite original event indices, and save with generate=true when the user requested generation. For live desktop UI set executionMode=desktop and declare the actual managed Computer Use tools from availableTools; do not substitute exec or SendKeys. Name relevant later page destinations when clarifying scope. A page appearing does not establish which click opened it. For an observed instruction use the cited event’s recordedAction verbatim, and put a suggested method in replayInstruction. Classify steps as observed, context-only, user-specified or unverified; snapshots evidence their visible content, not an unobserved action. Keep missing actions, parameter rules and outcomes in teachingGaps. Existing user requirements need no repeated clarification. Save unresolved gaps honestly; generation and execution are separate.` };
+      const guidance = { saveArguments: { action: "save", session_id: page.session.id, events_sha256: page.session.eventsSha256 },
+        skillCreator: config.skillCreator, availableTools: config.toolNames, desktopExecution: desktopGuidance(config), teachingReviewRequired: true,
+        next: `${page.session.availability === "partial" ? "This fragment has coverage gaps: retain the capture limitations and ask only about a missing action that affects the requested workflow. User clarification does not change recording completeness. " : ""}Follow the Host Skill Creator instructions below. The first evidence page is already included: do not read it again. If nextOffset is not null, read only subsequent pages with record_and_replay action=read, view=teaching, offset=nextOffset. Read rawRequired events via view=raw before citing them. Derive a concise draft from the recorded actions and values, cite original event indices, and add the draft to saveArguments to save after the user requests generation. For live desktop UI set executionMode=desktop and declare the actual managed Computer Use tools from availableTools; do not substitute exec or SendKeys. Name relevant later page destinations when clarifying scope. A page appearing does not establish which click opened it. For an observed instruction use the cited event’s recordedAction verbatim, and put a suggested method in replayInstruction. Classify steps as observed, context-only, user-specified or unverified; snapshots evidence their visible content, not an unobserved action. Keep missing actions, parameter rules and outcomes in teachingGaps. Existing user requirements need no repeated clarification. Save unresolved gaps honestly; generation and execution are separate.` };
       // Fit the normal Host 16k-character tool-result window, including creator
       // instructions, so the model can read evidence without unpacking a spill file.
       const budget = Math.max(1_000, 14_500 - JSON.stringify({ ...page, events: [], ...guidance }).length - 1_000);

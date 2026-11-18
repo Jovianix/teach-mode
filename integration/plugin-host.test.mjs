@@ -208,7 +208,7 @@ test("macOS Host installs the declared package, records a fragment and saves a u
   assert.equal(f.loader.listSkills(false).some(skill => skill.name === draft.name), false);
   const prepared = await f.invoke("create_skill", { action: "prepare", session_id: active.id });
   assert.match(prepared.skillCreator.instructions, /# Skill Creator/);
-  const saved = await f.invoke("create_skill", { action: "save", session_id: active.id, events_sha256: ended.eventsSha256, generate: true, draft });
+  const saved = await f.invoke("create_skill", { ...prepared.saveArguments, draft });
   assert.equal(saved.execution, "not_run"); assert.ok(f.loader.listSkills(false).some(skill => skill.name === draft.name));
   await f.plugins.disable(manifest.id);
   assert.equal(f.loader.listSkills(false).some(skill => skill.name === draft.name), false);

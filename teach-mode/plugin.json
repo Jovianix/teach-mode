@@ -126,7 +126,8 @@
             "enum": [
               "prepare",
               "save"
-            ]
+            ],
+            "description": "prepare 获取证据和 saveArguments。save 使用返回的参数，并附上 draft。"
           },
           "session_id": {
             "type": "string",
@@ -137,7 +138,11 @@
             "pattern": "^[a-f0-9]{64}$"
           },
           "generate": {
-            "type": "boolean"
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": "兼容旧调用。action=save 已表示保存，无需再传此字段。"
           },
           "draft": {
             "type": "object",
@@ -145,22 +150,27 @@
               "name": {
                 "type": "string",
                 "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
-                "maxLength": 64
+                "maxLength": 64,
+                "description": "1–64 个小写英文字母、数字或用单个连字符分隔的词，例如 open-folder。"
               },
               "description": {
                 "type": "string",
-                "minLength": 10
+                "minLength": 10,
+                "maxLength": 1000,
+                "description": "提供完整描述，避免 TODO、fill me in、尖括号等占位符。"
               },
               "goal": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "maxLength": 2000
               },
               "prerequisites": {
                 "type": "array",
                 "items": {
                   "type": "string",
                   "minLength": 1
-                }
+                },
+                "maxItems": 30
               },
               "parameters": {
                 "type": "array",
@@ -169,7 +179,9 @@
                   "properties": {
                     "name": {
                       "type": "string",
-                      "minLength": 1
+                      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                      "maxLength": 64,
+                      "description": "使用与技能名相同的格式，例如 folder-name。"
                     },
                     "description": {
                       "type": "string",
@@ -184,7 +196,8 @@
                     "description"
                   ],
                   "additionalProperties": false
-                }
+                },
+                "maxItems": 30
               },
               "steps": {
                 "type": "array",
@@ -195,6 +208,7 @@
                     "instruction": {
                       "type": "string",
                       "minLength": 1,
+                      "maxLength": 4000,
                       "description": "标记为 observed 时，原样使用所引用事件的 recordedAction。"
                     },
                     "evidenceIndexes": {
@@ -202,7 +216,8 @@
                       "items": {
                         "type": "integer",
                         "minimum": 0
-                      }
+                      },
+                      "maxItems": 100
                     },
                     "confirmedByUser": {
                       "type": "boolean"
@@ -235,30 +250,35 @@
                     "evidenceIndexes"
                   ],
                   "additionalProperties": false
-                }
+                },
+                "maxItems": 100
               },
               "tools": {
                 "type": "array",
                 "minItems": 1,
                 "items": {
                   "type": "string",
-                  "minLength": 1
-                }
+                  "pattern": "^[a-zA-Z0-9_-]{1,128}$"
+                },
+                "maxItems": 30
               },
               "completionChecks": {
                 "type": "array",
                 "minItems": 1,
                 "items": {
                   "type": "string",
-                  "minLength": 1
-                }
+                  "minLength": 1,
+                  "maxLength": 2000
+                },
+                "maxItems": 30
               },
               "limitations": {
                 "type": "array",
                 "items": {
                   "type": "string",
                   "minLength": 1
-                }
+                },
+                "maxItems": 30
               },
               "teachingGaps": {
                 "type": "array",
@@ -338,7 +358,32 @@
         "required": [
           "action"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "dependencies": {
+          "action": {
+            "if": {
+              "properties": {
+                "action": {
+                  "const": "save"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "session_id",
+                "events_sha256",
+                "draft"
+              ]
+            },
+            "else": {
+              "properties": {
+                "events_sha256": false,
+                "draft": false,
+                "generate": false
+              }
+            }
+          }
+        }
       },
       "outputSchema": {
         "type": "object"

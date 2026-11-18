@@ -64,8 +64,9 @@ stage. Do not execute or trial-run the result until separately requested.
    actual clarification, and retain the fact that its action was not observed.
    An unresolved step may be saved with an explicit teaching gap; do not invent
    missing instructions or claim the skill is ready for reliable execution.
-5. `save` with `generate:true`, `session_id`, the exact `events_sha256` and a
-   structured draft: `name`, `description`, `goal`, `prerequisites`, `parameters`
+5. Use the returned `saveArguments` and add a structured `draft`. Skill and
+   parameter names use lowercase letters, digits and single hyphens (e.g. `folder-name`).
+   The draft contains `name`, `description`, `goal`, `prerequisites`, `parameters`
    (`name`, `description`, optional `example`), `steps` (`instruction`,
    `evidenceIndexes`, `evidenceStatus`, optional `controlType` and
    `confirmedByUser`), `tools`, `completionChecks`, `limitations` and
