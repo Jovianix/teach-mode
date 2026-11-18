@@ -20,6 +20,8 @@ stage. Do not execute or trial-run the result until separately requested.
    it is null. Indices and groupedIndexes refer to the original raw events.
    Repeated redacted key presses never reveal their text. For `rawRequired` events
    or a needed omitted detail, use `view:"raw"`, `offset:<index>`, `limit:1`.
+   A macOS snapshot marked `rawAvailable` has a window summary; fetch the raw
+   row only if the workflow depends on an omitted control, selection or value.
    Once evidence is read, submit a concise structured draft directly to `save`;
    a simple workflow does not need intermediate scripts or repeated preparation.
 3. Derive the goal, prerequisites, meaningful steps, variable parameters,

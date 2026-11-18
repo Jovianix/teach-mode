@@ -62,6 +62,17 @@ describe("derived teaching evidence", () => {
     expect(rest.nextOffset).toBe(50);
   });
 
+  it("fits large Mac snapshots alongside later actions while retaining the original for a detail read", () => {
+    const tree = "AXWindow|AXStandardWindow|Search results|\n" + "AXButton|Result|\n".repeat(2000);
+    const recording = page([row(4, { eventType: "accessibility_snapshot",
+      ax: { mode: "full", text: tree, truncated: true } }), row(5, { eventType: "mouse_click" })]);
+    const view = teachingEvidence(recording, 1000);
+    expect(view.nextOffset).toBeNull();
+    expect(view.events.map(row => row.index)).toEqual([4, 5]);
+    expect(view.events[0]!.ax).toEqual({ mode: "full", truncated: true, windowTitle: "Search results", rawAvailable: true });
+    expect(JSON.stringify(recording.events)).toContain("AXButton");
+  });
+
   it("explicitly requires raw access for oversized events instead of pretending they were fully read", () => {
     const result = teachingEvidence(page([row(0, { details: { text: "x".repeat(30_000) } }), row(1, { details: { text: "small" } })]), 1_000);
     expect(result.events[0]).toMatchObject({ index: 0, rawRequired: true });
