@@ -35,7 +35,11 @@ stage. Do not execute or trial-run the result until separately requested.
    `unverified`. Set `controlType` for form input steps to `text`,
    `date-time`, `select`, or `other`. Navigation and nearby clicks do not
    prove that a date was entered, an option selected, a field read, or a result
-   verified. Read all selected events before claiming an action was observed.
+   verified. Name relevant observed destinations when clarifying ambiguous navigation.
+   An observed instruction must match the recordedAction on a cited event. Put
+   parameterized or suggested actions in replayInstruction. A partial recording
+   warrants a teaching gap only when a required step or outcome is unresolved.
+   Read all selected events before claiming an action was observed.
    List missing actions, parameters and outcomes as `teachingGaps`, including
    zero-based `stepIndexes`, a concrete `description`, `reason`,
    `resolution` and `nextAction`. Reasons are `action-not-observed`,

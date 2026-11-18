@@ -194,7 +194,8 @@
                   "properties": {
                     "instruction": {
                       "type": "string",
-                      "minLength": 1
+                      "minLength": 1,
+                      "description": "标记为 observed 时，原样使用所引用事件的 recordedAction。"
                     },
                     "evidenceIndexes": {
                       "type": "array",
@@ -221,6 +222,12 @@
                         "select",
                         "other"
                       ]
+                    },
+                    "replayInstruction": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4000,
+                      "description": "建议的可复用执行方式，可包含任务参数。它与录制实际观察到的动作分开显示。"
                     }
                   },
                   "required": [

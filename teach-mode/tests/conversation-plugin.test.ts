@@ -147,11 +147,21 @@ describe("four-step conversation teaching", () => {
     }) }));
   });
   it("does not claim independent execution even when all step evidence is classified", async () => {
-    const f = fixture();
+    const f = fixture({ event: { eventType: "text_input" } });
+    f.session.availability = "partial";
     const result = await f.plugin.invoke("create_skill", { action: "save", session_id: id, events_sha256: f.eventsSha256,
-      generate: true, draft: { ...f.draft, steps: [{ ...f.draft.steps[0], evidenceStatus: "observed" }], teachingGaps: [] } });
+      generate: true, draft: { ...f.draft, steps: [{ ...f.draft.steps[0], instruction: "Enter text", evidenceStatus: "observed" }], teachingGaps: [] } });
     expect(result).toMatchObject({ execution: "not_run",
       teachingReview: { status: "no_declared_gaps", execution: "not_run", gaps: [] } });
+  });
+  it("does not label an inferred keyboard shortcut as observed when only a browser click was recorded", async () => {
+    const f = fixture({ event: { eventType: "click", details: { browserCapture: { origin: "extension" } } } });
+    const prepared = await f.plugin.invoke("create_skill", { action: "prepare", session_id: id });
+    expect(prepared.events).toMatchObject([{ recordedAction: "Click" }]);
+    const result = await f.plugin.invoke("create_skill", { action: "save", session_id: id, events_sha256: f.eventsSha256,
+      generate: true, draft: { ...f.draft, steps: [{ instruction: "Press Command+O", evidenceIndexes: [0], evidenceStatus: "observed" }] } });
+    expect(result.teachingReview).toMatchObject({ steps: [{ evidenceStatus: "context-only" }], gaps: [{ stepIndexes: [0] }] });
+    expect(fs.readFileSync(path.join(f.root, "generated-skills", f.draft.name, "SKILL.md"), "utf8")).toContain("Press Command+O [context-only");
   });
   it.each(["date-time", "select"])("does not treat nearby clicks as observed %s input", async controlType => {
     const f = fixture({ event: { eventType: "click", details: { role: "button", label: "Review" } } });
@@ -167,7 +177,7 @@ describe("four-step conversation teaching", () => {
   it("accepts a recorded date value while keeping execution unverified", async () => {
     const f = fixture({ event: { eventType: "text_input", details: { role: "input", inputType: "date", text: "2026-10-21" } } });
     const result = await f.plugin.invoke("create_skill", { action: "save", session_id: id, events_sha256: f.eventsSha256,
-      generate: true, draft: { ...f.draft, steps: [{ instruction: "Fill the invoice date", evidenceIndexes: [0],
+      generate: true, draft: { ...f.draft, steps: [{ instruction: "Enter text", replayInstruction: "Fill the invoice date", evidenceIndexes: [0],
         evidenceStatus: "observed", controlType: "date-time" }] } });
     expect(result).toMatchObject({ teachingReview: { status: "no_declared_gaps", execution: "not_run" } });
   });
@@ -199,7 +209,7 @@ describe("four-step conversation teaching", () => {
     expect(result).toMatchObject({ saved: true, execution: "not_run", teachingReview: {
       gaps: [{ stepIndexes: [0], reason: "action-not-observed", resolution: "user-specified" }] } });
     const markdown = fs.readFileSync(path.join(f.root, "generated-skills", f.draft.name, "SKILL.md"), "utf8");
-    expect(markdown).toContain("user-specified requirement; action not observed");
+    expect(markdown).toContain("Enter the date supplied in the user request [user-specified]");
     expect(markdown).not.toContain("user-confirmed clarification");
   });
   it("rejects gaps referring to nonexistent steps", async () => {
@@ -215,7 +225,7 @@ describe("four-step conversation teaching", () => {
     const stopped = await f.plugin.invoke("record_and_replay", {action: "stop", session_id: id});
     expect((stopped.presentation as {message: string}).message).toContain("coverage gaps");
     const prepared = await f.plugin.invoke("create_skill", {action: "prepare", session_id: id});
-    expect(prepared.next).toContain("review its limitations with the user");
+    expect(prepared.next).toContain("ask only about a missing action");
     expect(f.session.availability).toBe("partial");
     expect(f.publish).not.toHaveBeenCalled();
   });

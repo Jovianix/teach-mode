@@ -3,7 +3,7 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { HostInvoker } from "./host.js";
-import { teachingEvidence } from "./teaching-evidence.js";
+import { recordedAction, teachingEvidence } from "./teaching-evidence.js";
 import { retireLegacySkills } from "./legacy-skill-retirement.js";
 
 const identifier = z.string().max(64).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
@@ -19,6 +19,7 @@ const Draft = z.object({
   prerequisites: z.array(z.string().trim().min(1)).max(30),
   parameters: z.array(z.object({ name: identifier, description: z.string().min(1), example: z.string().optional() })).max(30),
   steps: z.array(z.object({ instruction: z.string().trim().min(1).max(4_000),
+    replayInstruction: z.string().trim().min(1).max(4_000).optional(),
     evidenceIndexes: z.array(z.number().int().nonnegative()).max(100),
     confirmedByUser: z.boolean().optional(),
     evidenceStatus: z.enum(["observed", "context-only", "user-specified", "unverified"]).default("unverified"),
@@ -80,7 +81,7 @@ export function createConversationTeachPlugin(host: HostInvoker) {
     const usable = session.eventCount > 0;
     return { ...session, presentation: {
       message: usable ? session.availability === "partial"
-        ? cn ? "录制片段已保留，部分操作未能确认完整。请先核对缺口，再让我使用 Skill Creator 生成 skill。" : "The recording was retained with coverage gaps. Review missing steps before requesting Skill Creator."
+        ? cn ? "录制片段已保留，部分操作未能确认完整。可以让我根据保留的步骤生成技能。" : "The recording was retained with coverage gaps. You can request Skill Creator for the retained steps."
         : cn ? "本次录制已结束，可以继续让我根据这段操作生成 skill。" : "Recording ended. Ask me to generate a skill from these operations."
         : cn ? "没有采集到可用事件，请确认采集范围后重新录制。" : "No usable events were captured. Check the authorized scope before recording again.",
       actions: usable ? [{ id: "generate-skill", label: cn ? "使用 Skill Creator…" : "Use Skill Creator…",
@@ -131,7 +132,14 @@ export function createConversationTeachPlugin(host: HostInvoker) {
       `# ${draft.name}`, "", draft.goal, "", "## Prerequisites", ...draft.prerequisites.map(value => `- ${value}`), "",
       "## Parameters", ...draft.parameters.map(parameter => `- \`${parameter.name}\`: ${parameter.description}${parameter.example ? ` (example: ${parameter.example}; replace for the current task)` : ""}`), "",
       "## Execution boundaries", ...executionRules.map(rule => `- ${rule}`), "",
-      "## Procedure", ...draft.steps.map((step, index) => `${index + 1}. ${step.instruction} (${step.evidenceIndexes.length ? `source events: ${step.evidenceIndexes.join(", ")}` : step.evidenceStatus === "user-specified" ? "user-specified requirement; action not observed" : step.confirmedByUser ? "user-confirmed clarification; action not observed" : "action not observed"})`), "",
+      "## Procedure", ...draft.steps.map((step, index) => {
+        const status = teachingReview.steps[index]!.evidenceStatus;
+        const cn = language === "zh-CN";
+        const label = cn ? { observed: "已观察", "context-only": "仅有上下文依据", "user-specified": "用户指定", unverified: "待验证" }[status] : status;
+        const citation = step.evidenceIndexes.length ? `${cn ? "，事件 " : ", events "}${step.evidenceIndexes.join(", ")}` : "";
+        const guidance = step.replayInstruction ? `\n   ${cn ? "建议复现方式：" : "Suggested replay: "}${step.replayInstruction}` : "";
+        return `${index + 1}. ${step.instruction} [${label}${citation}]${guidance}`;
+      }), "",
       "## Teaching gaps",
       "Recording integrity and task coverage are separate. This skill has not passed independent execution validation.",
       ...(teachingReview.gaps.length ? teachingReview.gaps.map(gap => `- ${gap.description} [${gap.resolution}]. ${gap.nextAction}`)
@@ -185,7 +193,7 @@ export function createConversationTeachPlugin(host: HostInvoker) {
         }
         const { view, ...hostInput } = input;
         const result = await host<Record<string, unknown>>("event-sessions", hostInput);
-        if (input.action === "read" && view === "teaching") return teachingEvidence(result as { session: Session; events: unknown[]; nextOffset: number | null });
+        if (input.action === "read" && view === "teaching") return teachingEvidence(result as { session: Session; events: unknown[]; nextOffset: number | null }, undefined, language === "zh-CN");
         if (input.action === "status" || input.action === "list") return { ...result, sessions: (result.sessions as unknown[]).map(present) };
         if (input.action === "stop") return { ...present(result), next: "Recording ended. Wait for the user to request Skill Creator generation; do not generate or execute automatically." };
         return result;
@@ -200,11 +208,11 @@ export function createConversationTeachPlugin(host: HostInvoker) {
       }
       const page = await read(input.session_id), config = await configuration();
       const guidance = { skillCreator: config.skillCreator, availableTools: config.toolNames, desktopExecution: desktopGuidance(config), teachingReviewRequired: true,
-        next: `${page.session.availability === "partial" ? "This fragment has coverage gaps: review its limitations with the user and retain them explicitly. User clarification does not change recording completeness. " : ""}Follow the Host Skill Creator instructions below. The first evidence page is already included: do not read it again. If nextOffset is not null, read only subsequent pages with record_and_replay action=read, view=teaching, offset=nextOffset. Read rawRequired events via view=raw before citing them. Derive a concise draft from the recorded actions and values, cite original event indices, and save with generate=true when the user requested generation. For live desktop UI set executionMode=desktop and declare the actual managed Computer Use tools from availableTools; do not substitute exec or SendKeys. Classify steps as observed, context-only, user-specified or unverified; snapshots evidence their visible content, not an unobserved action. Keep missing actions, parameter rules and outcomes in teachingGaps. Existing user requirements need no repeated clarification. Save unresolved gaps honestly; generation and execution are separate.` };
+        next: `${page.session.availability === "partial" ? "This fragment has coverage gaps: retain the capture limitations and ask only about a missing action that affects the requested workflow. User clarification does not change recording completeness. " : ""}Follow the Host Skill Creator instructions below. The first evidence page is already included: do not read it again. If nextOffset is not null, read only subsequent pages with record_and_replay action=read, view=teaching, offset=nextOffset. Read rawRequired events via view=raw before citing them. Derive a concise draft from the recorded actions and values, cite original event indices, and save with generate=true when the user requested generation. For live desktop UI set executionMode=desktop and declare the actual managed Computer Use tools from availableTools; do not substitute exec or SendKeys. Name relevant later page destinations when clarifying scope. A page appearing does not establish which click opened it. For an observed instruction use the cited event’s recordedAction verbatim, and put a suggested method in replayInstruction. Classify steps as observed, context-only, user-specified or unverified; snapshots evidence their visible content, not an unobserved action. Keep missing actions, parameter rules and outcomes in teachingGaps. Existing user requirements need no repeated clarification. Save unresolved gaps honestly; generation and execution are separate.` };
       // Fit the normal Host 16k-character tool-result window, including creator
       // instructions, so the model can read evidence without unpacking a spill file.
       const budget = Math.max(1_000, 14_500 - JSON.stringify({ ...page, events: [], ...guidance }).length - 1_000);
-      return { ...teachingEvidence(page, budget), ...guidance };
+      return { ...teachingEvidence(page, budget, language === "zh-CN"), ...guidance };
     }
   };
 }
@@ -214,42 +222,54 @@ function reviewTeaching(draft: z.infer<typeof Draft>, events: unknown[], session
     return [row.index, row.event] as const;
   }));
   const gaps = draft.teachingGaps.map(gap => ({ ...gap }));
-  for (const [index, step] of draft.steps.entries()) {
+  const steps = draft.steps.map((step, index) => {
     if (step.evidenceIndexes.some(value => !byIndex.has(value))) throw new Error("Referenced teaching evidence was not returned by the Host");
     const evidence = step.evidenceIndexes.map(value => byIndex.get(value));
     if (step.evidenceStatus === "observed" && ["date-time", "select"].includes(step.controlType ?? "")) {
       const supported = evidence.some(event => {
         const details = event?.details ?? {};
+        const isDateTime = step.controlType === "date-time";
+        const dateType = /^(date|datetime-local|time|month|week)$/;
+        const selectRole = /^(select|option|combobox|listbox)$/;
+        if (event?.eventType === "browser_action") {
+          if (details.source !== "browser_history" || details.phase !== "observed" || details.actor !== "human") return false;
+          const target = details.target as Record<string, unknown> | undefined;
+          if (target?.sensitive || typeof target?.value !== "string" || !target.value.trim() || target.value.includes("[REDACTED]")) return false;
+          return isDateTime
+            ? (details.action === "input" || details.action === "change") && dateType.test(String(target.inputType))
+            : details.action === "change" && (selectRole.test(String(target.role)) || /^(select|option)$/.test(String(target.tag)));
+        }
         if (details.redacted === true || !(String(details.text ?? details.value ?? "").trim())) return false;
-        return step.controlType === "date-time"
-          ? ["text_input", "text_changed"].includes(event?.eventType ?? "")
-            && /^(date|datetime-local|time|month|week)$/.test(String(details.inputType ?? ""))
-          : ["selection_changed", "select_option", "change"].includes(event?.eventType ?? "")
-            && /^(select|option|combobox|listbox)$/.test(String(details.role ?? ""));
+        return isDateTime
+          ? ["text_input", "text_changed"].includes(event?.eventType ?? "") && dateType.test(String(details.inputType ?? ""))
+          : ["selection_changed", "select_option", "change"].includes(event?.eventType ?? "") && selectRole.test(String(details.role ?? ""));
       });
       if (!supported) throw new Error(`Step ${index + 1}: ${step.controlType} has no matching recorded value/action. Mark it context-only or user-specified and retain a teaching gap; nearby navigation/click events are not proof.`);
     }
-    if (step.evidenceStatus !== "observed" && !gaps.some(gap => gap.stepIndexes.includes(index))) {
-      const fromUser = step.evidenceStatus === "user-specified" || step.confirmedByUser === true;
+    // Never attach the observed label to creator prose on the strength of nearby indices.
+    // For observed steps the instruction itself is a recorder-derived action. A reusable
+    // target or proposed method lives separately in replayInstruction.
+    let status = step.evidenceStatus;
+    if (status === "observed" && !evidence.some(event => event && recordedAction(event, cn) === step.instruction)) {
+      status = step.confirmedByUser ? "user-specified" : "context-only";
+    }
+    if (status !== "observed" && !gaps.some(gap => gap.stepIndexes.includes(index))) {
+      const fromUser = status === "user-specified" || step.confirmedByUser === true;
       gaps.push({
         description: cn
-          ? `步骤 ${index + 1}（${step.instruction}）：${fromUser ? "要求来自用户指令，录制未证明该动作" : step.evidenceStatus === "context-only" ? "只有相关页面或上下文证据，未证明具体操作" : "示范依据尚未确认"}。`
-          : `Step ${index + 1} (${step.instruction}): ${fromUser ? "the requirement comes from user instructions; its action was not observed" : step.evidenceStatus === "context-only" ? "only page/context evidence is present, not the action" : "action evidence has not been verified"}.`,
+          ? `步骤 ${index + 1}（${step.instruction}）：${fromUser ? "要求来自用户指令，录制未证明该动作" : status === "context-only" ? "只有相关页面或上下文证据，未证明具体操作" : "示范依据尚未确认"}。`
+          : `Step ${index + 1} (${step.instruction}): ${fromUser ? "the requirement comes from user instructions; its action was not observed" : status === "context-only" ? "only page/context evidence is present, not the action" : "action evidence has not been verified"}.`,
         stepIndexes: [index], reason: "action-not-observed", resolution: fromUser ? "user-specified" : "needs-validation",
         nextAction: cn ? "补充示范该步骤，或在使用提供的参数执行时单独验证实际结果；不要声称已从录制学会。" : "Demonstrate this step or independently verify its actual result using the supplied parameters; do not claim it was learned from the recording.",
       });
     }
-  }
-  if (session.availability === "partial" && !gaps.some(gap => gap.reason === "capture-gap")) {
-    gaps.push({ description: cn ? "源录制存在完整性缺口，未覆盖部分的操作无法确认。" : "The source recording has capture gaps; actions in the missing interval are not confirmed.",
-      stepIndexes: [], reason: "capture-gap", resolution: "needs-demonstration",
-      nextAction: cn ? "核对录制限制并补录缺失步骤；文字补充不能改变原始录制完整性。" : "Review capture limitations and demonstrate the missing steps; clarification does not change the original capture integrity." });
-  }
+    return { index, evidenceStatus: status, evidenceIndexes: step.evidenceIndexes,
+      ...(step.controlType ? { controlType: step.controlType } : {}) };
+  });
   return { schema: "memmy.teaching-review/v1", status: gaps.length ? "gaps_identified" : "no_declared_gaps",
     assessmentScope: "Creator-declared task coverage and structural evidence checks; not an exhaustive semantic audit.",
     recordingAvailability: session.availability, execution: "not_run",
-    steps: draft.steps.map((step, index) => ({ index, evidenceStatus: step.evidenceStatus,
-      evidenceIndexes: step.evidenceIndexes, ...(step.controlType ? { controlType: step.controlType } : {}) })), gaps };
+    steps, gaps };
 }
 function digest(bytes: Buffer) { return createHash("sha256").update(bytes).digest("hex"); }
 function canonical(file: string) {
