@@ -17,7 +17,7 @@ extension can enrich the same stream when the observation policy allows it.
   step may cite as observed. The creator can supply reusable replay instructions separately.
 - The `create_skill` manifest uses a JSON Schema dependency on `action` for its
   save-only required fields. This keeps the Host MCP tool's existing flat arguments.
-  Prepare returns those arguments with the ID and hash.
+  Prepare returns those arguments with the ID, hash and any refinement revision.
 - `prototype-migration.ts` retains the original data directory while activating a
   validated copy of event sessions and generated skills.
 - `legacy-skill-retirement.ts` withdraws old Web → Notepad skill registrations

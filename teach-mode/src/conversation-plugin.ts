@@ -51,9 +51,9 @@ const RecordingInput = z.object({ action: z.enum(["status", "list", "start", "st
   offset: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(100).optional(),
   view: z.enum(["raw", "teaching"]).optional(), include_memmy: z.boolean().optional() }).strict();
 const SaveInput = z.object({ action: z.literal("save"), session_id: sessionId, events_sha256: hash,
-  draft: Draft, generate: z.literal(true).optional(), include_memmy: z.boolean().optional() }).strict();
+  draft: Draft, generate: z.literal(true).optional(), refine_from: hash.optional(), include_memmy: z.boolean().optional() }).strict();
 const CreatorInput = z.discriminatedUnion("action", [SaveInput, z.object({ action: z.literal("prepare"),
-  session_id: sessionId.optional(), include_memmy: z.boolean().optional() }).strict()]);
+  session_id: sessionId.optional(), refine_skill: identifier.optional(), include_memmy: z.boolean().optional() }).strict()]);
 
 /** The model uses the existing Host Skill Creator; the plugin validates/saves its draft. */
 export function createConversationTeachPlugin(host: HostInvoker) {
@@ -106,6 +106,7 @@ export function createConversationTeachPlugin(host: HostInvoker) {
     return { ...page, events: page.events.filter(row => !excluded.has(row.index)), nextOffset,
       teachingEventCount: page.session.eventCount - excluded.size };
   }
+  const published = (name: string) => host<{ directory: string; sha256: string } | null>("skills", { action: "published", name });
   async function save(input: z.infer<typeof SaveInput>) {
     const draft = input.draft, config = await configuration();
     if (draft.tools.some(tool => /^mcp_(?:memmy|open)_computer_use_/.test(tool))) draft.executionMode = "desktop";
@@ -117,8 +118,12 @@ export function createConversationTeachPlugin(host: HostInvoker) {
       throw new Error("Desktop execution requires a declared, available managed Computer Use get_app_state tool; exec/SendKeys cannot replace it");
     }
     if (["teach-mode", "record-and-replay", "teach-skill-creator", "skill-creator"].includes(draft.name)) throw new Error("Choose a distinct user skill name");
-    const parent = path.join(dataDirectory, "generated-skills"), target = path.join(parent, draft.name);
-    if (config.skills.some(skill => skill.name === draft.name && canonical(skill.path) !== canonical(path.join(target, "SKILL.md")))) throw new Error("Skill name already exists in this workspace or another plugin; choose another name");
+    const parent = path.join(dataDirectory, "generated-skills");
+    const baseDirectory = path.join(parent, draft.name);
+    const current = input.refine_from ? await published(draft.name) : null;
+    if (input.refine_from && !current) throw new Error("Select an existing Teach skill to refine");
+    const currentFile = path.join(current?.directory ?? baseDirectory, "SKILL.md");
+    if (config.skills.some(skill => skill.name === draft.name && canonical(skill.path) !== canonical(currentFile))) throw new Error("Skill name already exists in this workspace or another plugin; choose another name");
     const first = await read(input.session_id, 0, 100, input.include_memmy), session = first.session;
     if (!first.teachingEventCount) throw new Error("No demonstration events remain after excluding recorder activity.");
     if (session.eventsSha256 !== input.events_sha256) throw new Error("Recording evidence hash changed; read the selected recording again");
@@ -139,6 +144,8 @@ export function createConversationTeachPlugin(host: HostInvoker) {
     }
     const teachingReview = reviewTeaching(draft, events, session, language === "zh-CN");
     const draftSha256 = digest(Buffer.from(JSON.stringify(draft)));
+    const revision = input.refine_from && digest(Buffer.from(session.id + draftSha256 + input.refine_from));
+    const target = revision ? path.join(parent, ".revisions", draft.name, revision) : baseDirectory;
     const source = { schema: "memmy.recorded-skill/v1", pluginId: "teach-mode", sessionId: session.id,
       eventsSha256: session.eventsSha256, draftSha256, startedAt: session.startedAt, endedAt: session.endedAt,
       eventCount: session.eventCount, selectedEventIndexes: [...indexes], tools: draft.tools,
@@ -177,6 +184,12 @@ export function createConversationTeachPlugin(host: HostInvoker) {
     if (Object.values(files).reduce((size, bytes) => size + bytes.length, 0) > 18_000_000) throw new Error("Selected skill evidence exceeds the bundle limit; choose a smaller, focused recording");
     fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
     if (fs.lstatSync(parent).isSymbolicLink()) throw new Error("Unsafe skill directory");
+    if (revision) {
+      for (const directory of [path.join(parent, ".revisions"), path.dirname(target)]) {
+        fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+        if (fs.lstatSync(directory).isSymbolicLink()) throw new Error("Unsafe revision directory");
+      }
+    }
     if (fs.existsSync(target)) {
       if (fs.lstatSync(target).isSymbolicLink()) throw new Error("Unsafe skill directory");
       const previous = JSON.parse(fs.readFileSync(path.join(target, "references", "source.json"), "utf8"));
@@ -192,7 +205,7 @@ export function createConversationTeachPlugin(host: HostInvoker) {
         fs.renameSync(stage, target);
       } finally { fs.rmSync(stage, { recursive: true, force: true }); }
     }
-    await host("skills", { action: "publish", skill: { name: draft.name, directory: target,
+    await host("skills", { action: "publish", expectedSha256: input.refine_from ?? null, skill: { name: draft.name, directory: target,
       files: Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, digest(bytes)])),
       checks: { [`event-sessions/${session.id}/events.jsonl`]: session.eventsSha256 } } });
     return { name: draft.name, description: draft.description, parameters: draft.parameters, tools: draft.tools,
@@ -238,12 +251,15 @@ export function createConversationTeachPlugin(host: HostInvoker) {
           next: "Select the recording identified by the user; clarify when multiple recordings could match." };
       }
       const page = await read(input.session_id, 0, 100, input.include_memmy), config = await configuration();
+      const current = input.refine_skill ? await published(input.refine_skill) : null;
+      if (input.refine_skill && !current) throw new Error("This Teach skill is not published");
       if (!page.teachingEventCount) return { session: page.session, teachingEventCount: 0, saved: false,
         next: "The recording contains no events in the demonstration scope. Tell the user and finish without generating a skill." };
       const guidance = { ...(page.teachingEventCount === page.session.eventCount && evidencePaths(page.session)),
         saveArguments: { action: "save", session_id: page.session.id, events_sha256: page.session.eventsSha256,
-          ...(page.session.includeMemmyApp === undefined && input.include_memmy && { include_memmy: true }) },
-        skillCreator: config.skillCreator, availableTools: config.toolNames,
+          ...(page.session.includeMemmyApp === undefined && input.include_memmy && { include_memmy: true }),
+          ...(current && { refine_from: current.sha256 }) },
+        ...(current && { existingSkill: { path: path.join(current.directory, "SKILL.md"), sha256: current.sha256 } }), skillCreator: config.skillCreator, availableTools: config.toolNames,
         desktopExecution: desktopGuidance(config), teachingReviewRequired: true,
         next: `${page.session.availability === "partial" ? "This fragment has coverage gaps: retain the capture limitations and ask only about a missing action that affects the requested workflow. User clarification does not change recording completeness. " : ""}Use the Host Skill Creator instructions. The first page is included; do not read it again. For live UI declare executionMode=desktop and managed Computer Use tools; do not substitute exec or SendKeys. Inspect the action timeline and subsequent pages. Read relevant original events for omitted details. Use the cited row’s recordedAction verbatim for an observed instruction. Put any generalization or proposed method in replayInstruction. Page states alone provide context. Add draft to saveArguments to save. Ask only if an ambiguity changes the workflow, then save. Never execute the generated skill during creation.` };
       // Fit the normal Host 16k-character tool-result window, including creator

@@ -100,7 +100,7 @@
     {
       "id": "create_skill",
       "name": "Skill Creator",
-      "description": "用户在聊天中说录制完成，或要求创建技能时调用。prepare 取得录制证据及 Host Skill Creator 指令；目标明确时直接生成并 save，只在影响可复用流程时澄清。",
+      "description": "用户在聊天中说录制完成，或要求创建、更新技能时调用。prepare 取得录制证据及 Host Skill Creator 指令；目标明确时直接生成并 save，只在影响可复用流程时澄清。",
       "execution": "request",
       "inputSchema": {
         "type": "object",
@@ -337,6 +337,17 @@
             ],
             "additionalProperties": false
           },
+          "refine_skill": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "maxLength": 64,
+            "description": "prepare only: name of the existing Teach skill the user wants to refine."
+          },
+          "refine_from": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "save only: previous skill hash returned by prepare when refining an existing skill."
+          },
           "include_memmy": {
             "type": "boolean",
             "description": "用户明确要演示 Memmy 自身操作时，在 start 中设为 true。旧录制没有保存范围时，可在 prepare、read 和 save 中指定。默认排除 Memmy 自身事件。"
@@ -360,12 +371,16 @@
                 "session_id",
                 "events_sha256",
                 "draft"
-              ]
+              ],
+              "properties": {
+                "refine_skill": false
+              }
             },
             "else": {
               "properties": {
                 "events_sha256": false,
                 "draft": false,
+                "refine_from": false,
                 "generate": false
               }
             }
