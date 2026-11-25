@@ -72,10 +72,11 @@ describe("four-step conversation teaching", () => {
     expect(new AjvJsonSchemaValidator().getValidator(schema)(input).valid).toBe(true);
     expect(await f.plugin.invoke("record_and_replay", input)).toMatchObject({ evidenceView: "teaching" });
     expect(f.eventCall).toHaveBeenLastCalledWith({ action: "read", session_id: id, offset: 0, limit: 1 });
-    // Saving still selects immutable raw evidence, not this derived view.
+    // The reusable bundle points to the immutable original without copying its screen content.
     await f.save();
     const saved = fs.readFileSync(path.join(f.root, "generated-skills/save-a-note/references/events.jsonl"), "utf8");
-    expect(saved).toContain("writer diagnostic");
+    expect(JSON.parse(saved)).toMatchObject({ index: 0, eventType: "text_input" });
+    expect(saved).not.toContain("writer diagnostic");
   });
   it("reports missing desktop tools without proposing exec as native input", async () => {
     const f = fixture();

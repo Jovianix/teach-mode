@@ -3,6 +3,7 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { HostInvoker } from "./host.js";
+import { demonstrationScope, type DemonstrationScope } from "./demonstration-scope.js";
 import { recordedAction, teachingEvidence } from "./teaching-evidence.js";
 import { retireLegacySkills } from "./legacy-skill-retirement.js";
 
@@ -31,7 +32,7 @@ const Draft = z.object({
   teachingGaps: z.array(TeachingGap).max(100).default([]),
 }).strict();
 type Session = { id: string; state: string; availability: string; eventsSha256: string | null; eventCount: number;
-  goal: string; startedAt: string; endedAt: string | null; limitations: string[] };
+  includeMemmyApp?: boolean; goal: string; startedAt: string; endedAt: string | null; limitations: string[] };
 type Configuration = { version: number; features?: string[]; supported: boolean; toolNames: string[]; skills: Array<{ name: string; path: string }>; skillCreator: { available: boolean; instructions?: string } };
 const desktopObservation = /^mcp_(?:memmy|open)_computer_use_get_app_state$/;
 const executionRules = [
@@ -48,11 +49,11 @@ const sessionId = z.string().uuid(), hash = z.string().regex(/^[a-f0-9]{64}$/);
 const RecordingInput = z.object({ action: z.enum(["status", "list", "start", "stop", "cancel", "read"]),
   session_id: sessionId.optional(), goal: z.string().max(2_000).optional(), consent: z.boolean().optional(),
   offset: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(100).optional(),
-  view: z.enum(["raw", "teaching"]).optional() }).strict();
+  view: z.enum(["raw", "teaching"]).optional(), include_memmy: z.boolean().optional() }).strict();
 const SaveInput = z.object({ action: z.literal("save"), session_id: sessionId, events_sha256: hash,
-  draft: Draft, generate: z.literal(true).optional() }).strict();
+  draft: Draft, generate: z.literal(true).optional(), include_memmy: z.boolean().optional() }).strict();
 const CreatorInput = z.discriminatedUnion("action", [SaveInput, z.object({ action: z.literal("prepare"),
-  session_id: sessionId.optional() }).strict()]);
+  session_id: sessionId.optional(), include_memmy: z.boolean().optional() }).strict()]);
 
 /** The model uses the existing Host Skill Creator; the plugin validates/saves its draft. */
 export function createConversationTeachPlugin(host: HostInvoker) {
@@ -78,7 +79,33 @@ export function createConversationTeachPlugin(host: HostInvoker) {
     const folder = path.join(dataDirectory, "event-sessions", z.string().uuid().parse(session.id));
     return { metadataPath: path.join(folder, "session.json"), eventsPath: path.join(folder, "events.jsonl") };
   };
-  const read = (id: string, offset = 0, limit = 100) => host<{ session: Session; events: unknown[]; nextOffset: number | null }>("event-sessions", { action: "read", session_id: id, offset, limit });
+  // Cache index sets only. Every tool read still goes through the Host's conversation
+  // ownership and integrity checks. Session offsets always refer to the immutable original.
+  let cached: { hash: string; scope: Promise<DemonstrationScope> } | undefined;
+  async function excludedIndexes(session: Session, legacyIncludeMemmy?: boolean) {
+    const hash = session.eventsSha256;
+    if (!hash) throw new Error("capture_ready_events_required");
+    if (cached?.hash !== hash) {
+      const scope = fs.promises.readFile(evidencePaths(session).eventsPath).then(bytes => {
+        if (digest(bytes) !== hash) throw new Error("capture_evidence_hash_mismatch");
+        return demonstrationScope(bytes.toString("utf8").split("\n"));
+      });
+      cached = { hash, scope };
+      void scope.catch(() => { if (cached?.scope === scope) cached = undefined; });
+    }
+    const index = await cached.scope;
+    return (session.includeMemmyApp ?? legacyIncludeMemmy) ? index.controls : index.host;
+  }
+  async function read(id: string, offset = 0, limit = 100, legacyIncludeMemmy?: boolean) {
+    const page = await host<{ session: Session; events: { index: number; event: Record<string, unknown> }[]; nextOffset: number | null }>(
+      "event-sessions", { action: "read", session_id: id, offset, limit });
+    const excluded = await excludedIndexes(page.session, legacyIncludeMemmy);
+    let nextOffset = page.nextOffset;
+    while (nextOffset !== null && excluded.has(nextOffset)) nextOffset++;
+    if (nextOffset !== null && nextOffset >= page.session.eventCount) nextOffset = null;
+    return { ...page, events: page.events.filter(row => !excluded.has(row.index)), nextOffset,
+      teachingEventCount: page.session.eventCount - excluded.size };
+  }
   async function save(input: z.infer<typeof SaveInput>) {
     const draft = input.draft, config = await configuration();
     if (draft.tools.some(tool => /^mcp_(?:memmy|open)_computer_use_/.test(tool))) draft.executionMode = "desktop";
@@ -92,7 +119,8 @@ export function createConversationTeachPlugin(host: HostInvoker) {
     if (["teach-mode", "record-and-replay", "teach-skill-creator", "skill-creator"].includes(draft.name)) throw new Error("Choose a distinct user skill name");
     const parent = path.join(dataDirectory, "generated-skills"), target = path.join(parent, draft.name);
     if (config.skills.some(skill => skill.name === draft.name && canonical(skill.path) !== canonical(path.join(target, "SKILL.md")))) throw new Error("Skill name already exists in this workspace or another plugin; choose another name");
-    const first = await read(input.session_id), session = first.session;
+    const first = await read(input.session_id, 0, 100, input.include_memmy), session = first.session;
+    if (!first.teachingEventCount) throw new Error("No demonstration events remain after excluding recorder activity.");
     if (session.eventsSha256 !== input.events_sha256) throw new Error("Recording evidence hash changed; read the selected recording again");
     for (const [index, step] of draft.steps.entries()) {
       if (!step.evidenceIndexes.length && step.confirmedByUser !== true && step.evidenceStatus !== "user-specified"
@@ -105,7 +133,7 @@ export function createConversationTeachPlugin(host: HostInvoker) {
     const selected = (events: unknown[]) => events.filter(event => indexes.has((event as { index: number }).index));
     const events = selected(first.events); let nextOffset = first.nextOffset;
     while (nextOffset !== null) {
-      const page = await read(input.session_id, nextOffset);
+      const page = await read(input.session_id, nextOffset, 100, input.include_memmy);
       if (page.session.eventsSha256 !== session.eventsSha256 || page.nextOffset === nextOffset) throw new Error("capture_evidence_changed");
       events.push(...selected(page.events)); nextOffset = page.nextOffset;
     }
@@ -142,7 +170,10 @@ export function createConversationTeachPlugin(host: HostInvoker) {
     validateResources(markdown);
     const files = { "SKILL.md": Buffer.from(markdown), "references/source.json": Buffer.from(JSON.stringify(source, null, 2)),
       "references/teaching-gaps.json": Buffer.from(JSON.stringify(teachingReview, null, 2)),
-      "references/events.jsonl": Buffer.from(events.map(event => JSON.stringify(event)).join("\n") + (events.length ? "\n" : "")) };
+      "references/events.jsonl": Buffer.from(events.map(raw => {
+        const row = raw as { index: number; source: unknown; event: { timestamp?: string; eventType?: string } };
+        return JSON.stringify({ index: row.index, source: row.source, timestamp: row.event.timestamp, eventType: row.event.eventType });
+      }).join("\n") + (events.length ? "\n" : "")) };
     if (Object.values(files).reduce((size, bytes) => size + bytes.length, 0) > 18_000_000) throw new Error("Selected skill evidence exceeds the bundle limit; choose a smaller, focused recording");
     fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
     if (fs.lstatSync(parent).isSymbolicLink()) throw new Error("Unsafe skill directory");
@@ -178,20 +209,23 @@ export function createConversationTeachPlugin(host: HostInvoker) {
       await initialize();
       if (capability === "record_and_replay") {
         const input = RecordingInput.parse(raw);
-        const { view, ...hostInput } = input;
+        const { view, include_memmy, ...hostInput } = input;
         if (input.action === "start") {
           if (input.consent === false) return { state: "cancelled", recordingStarted: false };
-          return host("event-sessions", { ...hostInput, consent: true, recordingControls: "record-and-replay" });
+          return host("event-sessions", { ...hostInput, consent: true, ...(include_memmy && { includeMemmyApp: true }), recordingControls: "record-and-replay" });
         }
         if (input.action === "read") {
           if (!input.session_id) throw new Error("capture_session_id_required");
-          const page = await read(input.session_id, input.offset, input.limit);
+          const page = await read(input.session_id, input.offset, input.limit, include_memmy);
           return view === "teaching" ? teachingEvidence(page, undefined, language === "zh-CN") : page;
         }
         const result = await host<Record<string, unknown>>("event-sessions", hostInput);
         if (input.action === "stop" && result.state === "ready" && Number(result.eventCount) > 0) {
-          return { ...result, ...evidencePaths(result as Session),
-            next: "When the user reports completion in chat, use Skill Creator with this session now. Wait for the user to report completion after a controls-only stop." };
+          const session = result as Session, excluded = await excludedIndexes(session, include_memmy);
+          const teachingEventCount = session.eventCount - excluded.size;
+          return { ...result, ...(excluded.size === 0 && evidencePaths(session)), teachingEventCount,
+            next: teachingEventCount ? "When the user reports completion in chat, use Skill Creator with this session now. Wait for the user to report completion after a controls-only stop."
+              : "The recording contains no events in the demonstration scope. Tell the user and finish without generating a skill." };
         }
         return result;
       }
@@ -203,9 +237,12 @@ export function createConversationTeachPlugin(host: HostInvoker) {
         return { recordings: sessions.filter(s => s.state === "ready" && s.eventCount > 0), requiresSelection: true,
           next: "Select the recording identified by the user; clarify when multiple recordings could match." };
       }
-      const page = await read(input.session_id), config = await configuration();
-      const guidance = { ...evidencePaths(page.session),
-        saveArguments: { action: "save", session_id: page.session.id, events_sha256: page.session.eventsSha256 },
+      const page = await read(input.session_id, 0, 100, input.include_memmy), config = await configuration();
+      if (!page.teachingEventCount) return { session: page.session, teachingEventCount: 0, saved: false,
+        next: "The recording contains no events in the demonstration scope. Tell the user and finish without generating a skill." };
+      const guidance = { ...(page.teachingEventCount === page.session.eventCount && evidencePaths(page.session)),
+        saveArguments: { action: "save", session_id: page.session.id, events_sha256: page.session.eventsSha256,
+          ...(page.session.includeMemmyApp === undefined && input.include_memmy && { include_memmy: true }) },
         skillCreator: config.skillCreator, availableTools: config.toolNames,
         desktopExecution: desktopGuidance(config), teachingReviewRequired: true,
         next: `${page.session.availability === "partial" ? "This fragment has coverage gaps: retain the capture limitations and ask only about a missing action that affects the requested workflow. User clarification does not change recording completeness. " : ""}Use the Host Skill Creator instructions. The first page is included; do not read it again. For live UI declare executionMode=desktop and managed Computer Use tools; do not substitute exec or SendKeys. Inspect the action timeline and subsequent pages. Read relevant original events for omitted details. Use the cited row’s recordedAction verbatim for an observed instruction. Put any generalization or proposed method in replayInstruction. Page states alone provide context. Add draft to saveArguments to save. Ask only if an ambiguity changes the workflow, then save. Never execute the generated skill during creation.` };
@@ -223,7 +260,7 @@ function reviewTeaching(draft: z.infer<typeof Draft>, events: unknown[], session
   }));
   const gaps = draft.teachingGaps.map(gap => ({ ...gap }));
   const steps = draft.steps.map((step, index) => {
-    if (step.evidenceIndexes.some(value => !byIndex.has(value))) throw new Error("Referenced teaching evidence was not returned by the Host");
+    if (step.evidenceIndexes.some(value => !byIndex.has(value))) throw new Error("Step references an event outside this demonstration. Use original indices from the teaching view.");
     const evidence = step.evidenceIndexes.map(value => byIndex.get(value));
     if (step.evidenceStatus === "observed" && ["date-time", "select"].includes(step.controlType ?? "")) {
       const supported = evidence.some(event => {

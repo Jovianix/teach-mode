@@ -10,6 +10,9 @@ extension can enrich the same stream when the observation policy allows it.
 - `host.ts` limits plugin calls to `plugin-context`, `event-sessions`, and `skills`.
 - `conversation-plugin.ts` requests event capture, prepares evidence for the Host
   Skill Creator, validates drafts, and saves/registers generated skills.
+- `demonstration-scope.ts` identifies Memmy and its recording controls for both
+  evidence views and validates the scope of references at save time. Original
+  Computer History events and their indices are preserved.
 - `teaching-evidence.ts` derives compact timeline entries and the action text a
   step may cite as observed. The creator can supply reusable replay instructions separately.
 - The `create_skill` manifest uses a JSON Schema dependency on `action` for its

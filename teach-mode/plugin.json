@@ -81,7 +81,11 @@
               "raw",
               "teaching"
             ],
-            "description": "read 的证据视图。默认 raw 保持原始事件；teaching 提供有界精简页，保留原事件索引、脱敏和覆盖限制。"
+            "description": "read 的 teaching 视图提供精简时间线，raw 视图提供同一演示范围内原索引位置的事件详情。"
+          },
+          "include_memmy": {
+            "type": "boolean",
+            "description": "用户明确要演示 Memmy 自身操作时，在 start 中设为 true。旧录制没有保存范围时，可在 prepare、read 和 save 中指定。默认排除 Memmy 自身事件。"
           }
         },
         "required": [
@@ -332,6 +336,10 @@
               "limitations"
             ],
             "additionalProperties": false
+          },
+          "include_memmy": {
+            "type": "boolean",
+            "description": "用户明确要演示 Memmy 自身操作时，在 start 中设为 true。旧录制没有保存范围时，可在 prepare、read 和 save 中指定。默认排除 Memmy 自身事件。"
           }
         },
         "required": [
