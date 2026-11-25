@@ -58,10 +58,23 @@ async function fixture(t, behavior = {}) {
         async release() { if (!released) { released = true; subscribers--; } } };
     } } });
   await harness.start(); let calls = 0;
-  const invoke = async (capabilityId, input, conversationId = "chat-a") => {
-    for await (const event of harness.plugins.invoke({ callId: `fixture-${++calls}`, pluginId: "teach-mode", capabilityId, conversationId, input })) {
+  const invoke = async (capabilityId, input, conversationId = "chat-a", approveRecording = true) => {
+    const callId = `fixture-${++calls}`;
+    let confirmed = false;
+    for await (const event of harness.plugins.invoke({ callId, pluginId: "teach-mode", capabilityId, conversationId, input })) {
+      if (event.type === "interaction") {
+        assert.equal(capabilityId, "record_and_replay");
+        assert.equal(input.action, "start");
+        assert.equal(event.request.type, "approval");
+        assert.equal(event.request.interactionId, "recording-start");
+        await harness.plugins.respond("teach-mode", callId, event.request.interactionId, approveRecording);
+        confirmed = true;
+      }
       if (event.type === "error") throw new Error(event.message);
-      if (event.type === "result") return event.output;
+      if (event.type === "result") {
+        if (input.action === "start") assert.ok(confirmed, "The Host must ask before recording");
+        return event.output;
+      }
     }
     throw new Error("Missing terminal capability result");
   };
@@ -114,20 +127,24 @@ test("anonymous install and repeated clicks retain permission approval and one d
 test("recording and generation are separate, conversation scoped, and use the actual Host Skill Creator validator", async t => {
   const f = await fixture(t); await f.install();
   await f.invoke("record_and_replay", { action: "status" }); assert.equal(f.subscribers(), 0);
-  const first = await f.invoke("record_and_replay", { action: "start", goal: "Save a note", consent: true }, "websocket:chat-a");
-  const second = await f.invoke("record_and_replay", { action: "start", goal: "Another note", consent: true }, "chat-b");
-  assert.equal(first.conversationId, "chat-a"); assert.equal(f.subscribers(), 2);
+  const declined = await f.invoke("record_and_replay", { action: "start", goal: "Save a note" }, "chat-a", false);
+  assert.equal(declined.recordingStarted, false); assert.equal(f.subscribers(), 0);
+  const first = await f.invoke("record_and_replay", { action: "start", goal: "Save a note" }, "websocket:chat-a");
+  await assert.rejects(f.invoke("record_and_replay", { action: "start", goal: "Another note" }, "chat-b"), /capture_active_in_another_conversation/);
+  assert.equal(first.conversationId, "chat-a"); assert.equal(f.subscribers(), 1);
   const updating = f.plugins.update(manifest.id, manifest.version);
   void updating.catch(() => {}); // Fixture cleanup cancels it if an earlier assertion fails.
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(f.plugins.get(manifest.id).update?.status, "waiting");
   f.append("Recorded example note");
   const ended = await f.invoke("record_and_replay", { action: "stop", session_id: first.id });
-  assert.equal(ended.state, "ready"); assert.equal(ended.eventCount, 1); assert.equal(f.subscribers(), 1);
-  assert.ok(ended.presentation.actions[0].prompt.includes(first.id)); assert.equal(f.loader.listSkills(false).some(skill => skill.name === draft.name), false);
-  await assert.rejects(f.invoke("record_and_replay", { action: "read", session_id: first.id }, "chat-b"), /conversation/);
-  await f.invoke("record_and_replay", { action: "cancel", session_id: second.id }, "chat-b"); assert.equal(f.subscribers(), 0);
+  assert.equal(ended.state, "ready"); assert.equal(ended.teachingEventCount, 1); assert.equal(f.subscribers(), 0);
+  assert.equal(f.loader.listSkills(false).some(skill => skill.name === draft.name), false);
   await updating;
+  await assert.rejects(f.invoke("record_and_replay", { action: "read", session_id: first.id }, "chat-b"), /conversation/);
+  const second = await f.invoke("record_and_replay", { action: "start", goal: "Another note" }, "chat-b");
+  const cancelled = await f.invoke("record_and_replay", { action: "cancel", session_id: second.id }, "chat-b");
+  assert.equal(cancelled.state, "cancelled"); assert.equal(f.subscribers(), 0);
   const prepared = await f.invoke("create_skill", { action: "prepare", session_id: first.id }); assert.match(prepared.skillCreator.instructions, /# Skill Creator/);
   const saved = await f.invoke("create_skill", { action: "save", session_id: first.id, events_sha256: ended.eventsSha256, generate: true, draft });
   assert.equal(saved.saved, true); assert.equal(saved.execution, "not_run");
