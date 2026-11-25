@@ -105,6 +105,7 @@ describe("four-step conversation teaching", () => {
     expect(result).toMatchObject({ execution: "not_run", tools: draft.tools });
     const target = path.join(f.root, "generated-skills", draft.name);
     const markdown = fs.readFileSync(path.join(target, "SKILL.md"), "utf8");
+    expect(markdown).toContain("intended app and window");
     expect(markdown).toContain("Verify the requested outcome");
     expect(markdown).not.toMatch(/Windows Notepad|PowerShell|Independently read the requested output file/);
     expect(JSON.parse(markdown.split("metadata: ")[1]!.split("\n")[0]!).memmy.requires.tools).toEqual(draft.tools);
@@ -236,22 +237,23 @@ describe("four-step conversation teaching", () => {
   it("keeps partial fragments explicit before Skill Creator preparation", async () => {
     const f = fixture(); f.session.availability = "partial";
     const stopped = await f.plugin.invoke("record_and_replay", {action: "stop", session_id: id});
-    expect((stopped.presentation as {message: string}).message).toContain("coverage gaps");
+    expect(stopped).toMatchObject({ availability: "partial", eventsPath: expect.any(String) });
     const prepared = await f.plugin.invoke("create_skill", {action: "prepare", session_id: id});
     expect(prepared.next).toContain("ask only about a missing action");
+    expect(prepared.next).toContain("Ask only if an ambiguity changes the workflow");
     expect(f.session.availability).toBe("partial");
     expect(f.publish).not.toHaveBeenCalled();
   });
-  it("forwards the explicitly selected browser profile without starting desktop capture", async () => {
-    const f = fixture(); f.config.features.push("memmy.browser-event-sessions/v1");
-    const browser = { name: "edge", connection_id: "work-profile" };
-    await f.plugin.invoke("record_and_replay", { action: "start", goal: "Browser demonstration", consent: true, browser });
-    expect(f.eventCall).toHaveBeenLastCalledWith({ action: "start", goal: "Browser demonstration", consent: true, browser });
-  });
-  it("requires the browser capture Host capability before querying profiles or starting a teaching window", async () => {
+  it("uses the shared capture start for a browser demonstration", async () => {
     const f = fixture();
-    await expect(f.plugin.invoke("record_and_replay", { action: "browser-options" })).rejects.toThrow("browser-event-sessions");
-    await expect(f.plugin.invoke("record_and_replay", { action: "start", goal: "Browser", consent: true, browser: { name: "chrome" } })).rejects.toThrow("browser-event-sessions");
+    const input = { action: "start", goal: "Demonstrate a Chrome search", consent: true };
+    await f.plugin.invoke("record_and_replay", input);
+    expect(f.eventCall).toHaveBeenLastCalledWith({ ...input, recordingControls: "record-and-replay" });
+  });
+  it("rejects retired browser options before starting capture", async () => {
+    const f = fixture();
+    await expect(f.plugin.invoke("record_and_replay", { action: "browser-options" })).rejects.toThrow();
+    await expect(f.plugin.invoke("record_and_replay", { action: "start", goal: "Browser", consent: true, browser: { name: "chrome" } })).rejects.toThrow();
     expect(f.eventCall.mock.calls.every(([input]) => input.action === "configuration")).toBe(true);
   });
   it("does not capture on activation and does not generate on start or stop", async () => {

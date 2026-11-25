@@ -50,7 +50,7 @@ async function fixture(t, behavior = {}) {
   let harness;
   t.after(async () => { if (harness) await harness.close(); await new Promise(resolve => registry.close(resolve)); fs.rmSync(root, { recursive: true, force: true }); });
   harness = kit.createPluginHostHarness({ root, registryUrl: `http://127.0.0.1:${registry.address().port}`, platform: behavior.platform ?? (process.platform === "darwin" ? "darwin" : "win32"),
-    browser: behavior.browser, availableTools: behavior.availableTools,
+    availableTools: behavior.availableTools,
     source: { async acquireEventCapture() {
       subscribers++; let released = false;
       return { checkpoint: async () => ({ running: !released, complete: true, limitations: ["Controlled conformance events; not a real desktop recording"],
@@ -66,39 +66,22 @@ async function fixture(t, behavior = {}) {
     throw new Error("Missing terminal capability result");
   };
   const install = async () => { const record = await harness.plugins.install("teach-mode", manifest.version); await harness.plugins.approvePermissions(record.id, record.manifest.permissions); await harness.plugins.enable(record.id); return record; };
-  const append = text => fs.appendFileSync(stream, JSON.stringify({ recordType: "human_event", sequence: 1, eventType: "text_input", timestamp: new Date().toISOString(),
-    application: { name: "Controlled editor" }, details: { text } }) + "\n");
+  const append = (text, application = "Controlled editor") => fs.appendFileSync(stream, JSON.stringify({ recordType: "human_event", sequence: 1, eventType: "text_input", timestamp: new Date().toISOString(),
+    application: { name: application }, details: { text } }) + "\n");
   return { ...harness, root, invoke, install, append, downloads: () => downloads, subscribers: () => subscribers };
 }
 const draft = { name: "recorded-note", description: "Save the user requested note and verify the resulting file", goal: "Save a note", prerequisites: [],
   parameters: [{ name: "note", description: "The requested note" }], steps: [{ instruction: "Write the requested note using write_file", evidenceIndexes: [0] }],
   tools: ["write_file", "read_file"], completionChecks: ["Read and compare the actual file"], limitations: [] };
 
-for (const platform of ["win32", "darwin"]) test(`${platform} browser-only session travels through the downloaded MCP worker without acquiring desktop History`, async t => {
-  let stream, subscribers = 0;
-  const browser = {
-    profiles: () => ({ profiles: [{ browser: "edge", connectionId: "work-profile", supported: true, windows: [] }] }),
-    async acquire({ directory, sessionId, request }) {
-      assert.deepEqual(request, { name: "edge", connection_id: "work-profile" }); subscribers++;
-      stream = path.join(directory, "browser-source.jsonl"); fs.writeFileSync(stream, "");
-      let released = false;
-      return { browserCapture: { browser: "edge", windowId: 20, scope: "teaching-window-and-popups" },
-        checkpoint: async () => ({ running: !released, complete: true, rangeEvaluated: true, boundaryConfirmed: true,
-          streams: [{ id: `browser:${sessionId}`, file: stream, size: fs.statSync(stream).size }], limitations: ["Controlled browser source for MCP contract verification"] }),
-        async release() { if (!released) { released = true; subscribers--; } } };
-    },
-  };
+for (const platform of ["win32", "darwin"]) test(`${platform} browser demonstration uses the shared History stream through the downloaded MCP worker`, async t => {
   const tools = ["browser_snapshot", "browser_click", "browser_type"];
-  const f = await fixture(t, { platform, browser, availableTools: tools }); await f.install();
-  const options = await f.invoke("record_and_replay", { action: "browser-options" });
-  assert.equal(options.profiles[0].connectionId, "work-profile");
-  const session = await f.invoke("record_and_replay", { action: "start", goal: "Search the demonstrated website", consent: true,
-    browser: { name: "edge", connection_id: "work-profile" } });
-  assert.equal(session.browserCapture.windowId, 20); assert.equal(f.subscribers(), 0); assert.equal(subscribers, 1);
-  fs.appendFileSync(stream, JSON.stringify({ recordType: "human_event", sequence: 1, eventType: "text_input", timestamp: new Date().toISOString(),
-    application: { name: "Microsoft Edge" }, details: { text: "Recorded search" } }) + "\n");
+  const f = await fixture(t, { platform, availableTools: tools }); await f.install();
+  const session = await f.invoke("record_and_replay", { action: "start", goal: "Search the demonstrated website", consent: true });
+  assert.equal(f.subscribers(), 1);
+  f.append("Recorded search", "Microsoft Edge");
   const ended = await f.invoke("record_and_replay", { action: "stop", session_id: session.id });
-  assert.equal(ended.availability, "available"); assert.equal(ended.eventCount, 1); assert.equal(subscribers, 0);
+  assert.equal(ended.availability, "available"); assert.equal(ended.eventCount, 1); assert.equal(f.subscribers(), 0);
   const preparation = await f.invoke("create_skill", { action: "prepare", session_id: session.id });
   assert.deepEqual(preparation.availableTools, tools);
   assert.equal(preparation.evidenceView, "teaching");

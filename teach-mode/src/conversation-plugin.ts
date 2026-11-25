@@ -23,7 +23,7 @@ const Draft = z.object({
     evidenceIndexes: z.array(z.number().int().nonnegative()).max(100),
     confirmedByUser: z.boolean().optional(),
     evidenceStatus: z.enum(["observed", "context-only", "user-specified", "unverified"]).default("unverified"),
-    controlType: z.enum(["text", "date-time", "select", "other"]).optional() })).min(1).max(100),
+    controlType: z.enum(["text", "date-time", "select", "other"]).optional() }).strict()).min(1).max(100),
   tools: z.array(z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/)).min(1).max(30),
   executionMode: z.enum(["agent-tools", "desktop"]).default("agent-tools"),
   completionChecks: z.array(z.string().trim().min(1).max(2_000)).min(1).max(30),
@@ -35,8 +35,8 @@ type Session = { id: string; state: string; availability: string; eventsSha256: 
 type Configuration = { version: number; features?: string[]; supported: boolean; toolNames: string[]; skills: Array<{ name: string; path: string }>; skillCreator: { available: boolean; instructions?: string } };
 const desktopObservation = /^mcp_(?:memmy|open)_computer_use_get_app_state$/;
 const executionRules = [
-  "Use managed Computer Use tools for live UI. Identify the intended app and window from fresh state before acting.",
-  "Verify the requested outcome in the relevant control, page or document.",
+  "Use the Host computer-use skill and its managed tools. Identify the intended app and window from fresh state before acting.",
+  "Verify the requested outcome using the current state of the relevant control, page or document.",
 ];
 function desktopGuidance(config: Configuration) {
   const observationTool = config.toolNames.find(tool => desktopObservation.test(tool)) ?? null;
@@ -44,18 +44,15 @@ function desktopGuidance(config: Configuration) {
     tools: config.toolNames.filter(tool => /^mcp_(?:memmy|open)_computer_use_/.test(tool)),
     rules: executionRules };
 }
-const RecordingInput = z.object({ action: z.string(), session_id: z.string().uuid().optional(), goal: z.string().optional(),
-  browser: z.object({ name: z.enum(["chrome", "edge"]), connection_id: z.string().min(1).max(100).optional() }).strict().optional(),
-  consent: z.boolean().optional(), offset: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(100).optional(),
+const sessionId = z.string().uuid(), hash = z.string().regex(/^[a-f0-9]{64}$/);
+const RecordingInput = z.object({ action: z.enum(["status", "list", "start", "stop", "cancel", "read"]),
+  session_id: sessionId.optional(), goal: z.string().max(2_000).optional(), consent: z.boolean().optional(),
+  offset: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(100).optional(),
   view: z.enum(["raw", "teaching"]).optional() }).strict();
-const SaveInput = z.object({
-  action: z.literal("save"), session_id: z.string().uuid(), events_sha256: z.string().regex(/^[a-f0-9]{64}$/),
-  draft: Draft, generate: z.literal(true).optional(),
-}).strict();
-const CreatorInput = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("prepare"), session_id: z.string().uuid().optional() }).strict(),
-  SaveInput,
-]);
+const SaveInput = z.object({ action: z.literal("save"), session_id: sessionId, events_sha256: hash,
+  draft: Draft, generate: z.literal(true).optional() }).strict();
+const CreatorInput = z.discriminatedUnion("action", [SaveInput, z.object({ action: z.literal("prepare"),
+  session_id: sessionId.optional() }).strict()]);
 
 /** The model uses the existing Host Skill Creator; the plugin validates/saves its draft. */
 export function createConversationTeachPlugin(host: HostInvoker) {
@@ -77,21 +74,11 @@ export function createConversationTeachPlugin(host: HostInvoker) {
     await retireLegacySkills(host, context.dataDirectory);
     dataDirectory = context.dataDirectory; language = context.language ?? "en-US";
   })();
-  const present = (raw: unknown) => {
-    const session = raw as Session & { id: string; eventCount: number };
-    const cn = language === "zh-CN";
-    if (session.state !== "ready") return session;
-    const usable = session.eventCount > 0;
-    return { ...session, presentation: {
-      message: usable ? session.availability === "partial"
-        ? cn ? "录制片段已保留，部分操作未能确认完整。可以让我根据保留的步骤生成技能。" : "The recording was retained with coverage gaps. You can request Skill Creator for the retained steps."
-        : cn ? "本次录制已结束，可以继续让我根据这段操作生成 skill。" : "Recording ended. Ask me to generate a skill from these operations."
-        : cn ? "没有采集到可用事件，请确认采集范围后重新录制。" : "No usable events were captured. Check the authorized scope before recording again.",
-      actions: usable ? [{ id: "generate-skill", label: cn ? "使用 Skill Creator…" : "Use Skill Creator…",
-        prompt: `$teach-skill-creator\n\n${cn ? "根据这段录制生成 skill" : "Generate a skill from this recording"}: ${session.id}` }] : []
-    } };
+  const evidencePaths = (session: Session) => {
+    const folder = path.join(dataDirectory, "event-sessions", z.string().uuid().parse(session.id));
+    return { metadataPath: path.join(folder, "session.json"), eventsPath: path.join(folder, "events.jsonl") };
   };
-  const read = (id: string, offset = 0) => host<{ session: Session; events: unknown[]; nextOffset: number | null }>("event-sessions", { action: "read", session_id: id, offset, limit: 100 });
+  const read = (id: string, offset = 0, limit = 100) => host<{ session: Session; events: unknown[]; nextOffset: number | null }>("event-sessions", { action: "read", session_id: id, offset, limit });
   async function save(input: z.infer<typeof SaveInput>) {
     const draft = input.draft, config = await configuration();
     if (draft.tools.some(tool => /^mcp_(?:memmy|open)_computer_use_/.test(tool))) draft.executionMode = "desktop";
@@ -191,15 +178,21 @@ export function createConversationTeachPlugin(host: HostInvoker) {
       await initialize();
       if (capability === "record_and_replay") {
         const input = RecordingInput.parse(raw);
-        if (!["status", "list", "start", "stop", "cancel", "read", "browser-options"].includes(input.action)) throw new Error("Unknown event recording action");
-        if ((input.browser || input.action === "browser-options") && !(await configuration()).features?.includes("memmy.browser-event-sessions/v1")) {
-          throw new Error("Browser teaching requires Host browser-event-sessions/v1; update the desktop app");
-        }
         const { view, ...hostInput } = input;
+        if (input.action === "start") {
+          if (input.consent === false) return { state: "cancelled", recordingStarted: false };
+          return host("event-sessions", { ...hostInput, consent: true, recordingControls: "record-and-replay" });
+        }
+        if (input.action === "read") {
+          if (!input.session_id) throw new Error("capture_session_id_required");
+          const page = await read(input.session_id, input.offset, input.limit);
+          return view === "teaching" ? teachingEvidence(page, undefined, language === "zh-CN") : page;
+        }
         const result = await host<Record<string, unknown>>("event-sessions", hostInput);
-        if (input.action === "read" && view === "teaching") return teachingEvidence(result as { session: Session; events: unknown[]; nextOffset: number | null }, undefined, language === "zh-CN");
-        if (input.action === "status" || input.action === "list") return { ...result, sessions: (result.sessions as unknown[]).map(present) };
-        if (input.action === "stop") return { ...present(result), next: "Recording ended. Wait for the user to request Skill Creator generation; do not generate or execute automatically." };
+        if (input.action === "stop" && result.state === "ready" && Number(result.eventCount) > 0) {
+          return { ...result, ...evidencePaths(result as Session),
+            next: "When the user reports completion in chat, use Skill Creator with this session now. Wait for the user to report completion after a controls-only stop." };
+        }
         return result;
       }
       if (capability !== "create_skill") throw new Error("Unknown Teach Mode capability");
@@ -207,13 +200,15 @@ export function createConversationTeachPlugin(host: HostInvoker) {
       if (input.action === "save") return save(input);
       if (!input.session_id) {
         const { sessions } = await host<{ sessions: Session[] }>("event-sessions", { action: "list" });
-        return { recordings: sessions.filter(s => s.state === "ready"), requiresSelection: true,
+        return { recordings: sessions.filter(s => s.state === "ready" && s.eventCount > 0), requiresSelection: true,
           next: "Select the recording identified by the user; clarify when multiple recordings could match." };
       }
       const page = await read(input.session_id), config = await configuration();
-      const guidance = { saveArguments: { action: "save", session_id: page.session.id, events_sha256: page.session.eventsSha256 },
-        skillCreator: config.skillCreator, availableTools: config.toolNames, desktopExecution: desktopGuidance(config), teachingReviewRequired: true,
-        next: `${page.session.availability === "partial" ? "This fragment has coverage gaps: retain the capture limitations and ask only about a missing action that affects the requested workflow. User clarification does not change recording completeness. " : ""}Follow the Host Skill Creator instructions below. The first evidence page is already included: do not read it again. If nextOffset is not null, read only subsequent pages with record_and_replay action=read, view=teaching, offset=nextOffset. Read rawRequired events via view=raw before citing them. Derive a concise draft from the recorded actions and values, cite original event indices, and add the draft to saveArguments to save after the user requests generation. For live desktop UI set executionMode=desktop and declare the actual managed Computer Use tools from availableTools; do not substitute exec or SendKeys. Name relevant later page destinations when clarifying scope. A page appearing does not establish which click opened it. For an observed instruction use the cited event’s recordedAction verbatim, and put a suggested method in replayInstruction. Classify steps as observed, context-only, user-specified or unverified; snapshots evidence their visible content, not an unobserved action. Keep missing actions, parameter rules and outcomes in teachingGaps. Existing user requirements need no repeated clarification. Save unresolved gaps honestly; generation and execution are separate.` };
+      const guidance = { ...evidencePaths(page.session),
+        saveArguments: { action: "save", session_id: page.session.id, events_sha256: page.session.eventsSha256 },
+        skillCreator: config.skillCreator, availableTools: config.toolNames,
+        desktopExecution: desktopGuidance(config), teachingReviewRequired: true,
+        next: `${page.session.availability === "partial" ? "This fragment has coverage gaps: retain the capture limitations and ask only about a missing action that affects the requested workflow. User clarification does not change recording completeness. " : ""}Use the Host Skill Creator instructions. The first page is included; do not read it again. For live UI declare executionMode=desktop and managed Computer Use tools; do not substitute exec or SendKeys. Inspect the action timeline and subsequent pages. Read relevant original events for omitted details. Use the cited row’s recordedAction verbatim for an observed instruction. Put any generalization or proposed method in replayInstruction. Page states alone provide context. Add draft to saveArguments to save. Ask only if an ambiguity changes the workflow, then save. Never execute the generated skill during creation.` };
       // Fit the normal Host 16k-character tool-result window, including creator
       // instructions, so the model can read evidence without unpacking a spill file.
       const budget = Math.max(1_000, 14_500 - JSON.stringify({ ...page, events: [], ...guidance }).length - 1_000);

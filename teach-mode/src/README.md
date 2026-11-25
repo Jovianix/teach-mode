@@ -1,15 +1,20 @@
 # Conversation Teach Mode
 
 The plugin exposes `record_and_replay` and `create_skill`. Both Windows and macOS
-use the same conversation flow; the Host supplies desktop Computer History and
-Chrome/Edge extension events through `event-sessions`.
+use the same conversation flow; the Host supplies Computer History through
+`event-sessions` for every app, including Chrome and Edge. A connected
+extension can enrich the same stream when the observation policy allows it.
 
 - `index.ts` owns MCP routing and process shutdown. It copies validated prototype
   data before initializing the conversation plugin.
 - `host.ts` limits plugin calls to `plugin-context`, `event-sessions`, and `skills`.
 - `conversation-plugin.ts` requests event capture, prepares evidence for the Host
   Skill Creator, validates drafts, and saves/registers generated skills.
-- `teaching-evidence.ts` provides a compact view while preserving raw event indices.
+- `teaching-evidence.ts` derives compact timeline entries and the action text a
+  step may cite as observed. The creator can supply reusable replay instructions separately.
+- The `create_skill` manifest uses a JSON Schema dependency on `action` for its
+  save-only required fields. This keeps the Host MCP tool's existing flat arguments.
+  Prepare returns those arguments with the ID and hash.
 - `prototype-migration.ts` retains the original data directory while activating a
   validated copy of event sessions and generated skills.
 - `legacy-skill-retirement.ts` withdraws old Web → Notepad skill registrations
@@ -24,5 +29,4 @@ retained config object without exposing the retired setting.
 
 The App's user-initiated task recording remains a separate feature. System screen
 recording permission may remain granted. Teach never starts video capture.
-Ending event capture does not generate a skill; generation requires a separate
-request. Saving a skill does not prove that a later execution succeeds.
+Stopping from the controls retains the recording. Reporting completion in chat hands it to Skill Creator. Saving a skill does not prove that a later execution succeeds.

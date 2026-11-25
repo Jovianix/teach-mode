@@ -14,10 +14,10 @@ npm run build
 ```
 
 Host 首个适配版本为 1.2.3-rc.8；插件同时探测所需 Host 能力。
-`/teach` 加载 Record and Replay，明确开始后才录制。结束后等待用户另行请求
+`/teach` 加载 Record and Replay，在 App 确认后开始录制。浮窗可停止并保留片段或丢弃录制；在聊天中说“录制完成”后由
 Skill Creator 生成技能，生成成功不代表执行成功。0.5.0 开发候选支持 Windows 与 macOS 14+，未安装系统 Node 时使用宿主运行时。
 Host 需提供新增的 `memmy.event-checkpoints/v1`；配置和验收见
-[macOS Teach Mode](docs/macos-teach-mode.md)。桌面教学复用 Computer History，浏览器教学使用宿主扩展；插件不调用视频录制服务。
+[macOS Teach Mode](docs/macos-teach-mode.md)。桌面和浏览器教学统一复用已授权的 Computer History；用户可直接在现有 Chrome 或 Edge 窗口演示；插件不调用视频录制服务。
 
 本地 ZIP 是开发制品。正式发布须提供 `MEMMY_HOST_RELEASE_DESCRIPTOR`，并设置
 `MEMMY_PLUGIN_RELEASE=1`；构建会拒绝未提交修改或未发布的 Host 描述。

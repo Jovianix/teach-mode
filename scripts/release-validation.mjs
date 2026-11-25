@@ -58,21 +58,26 @@ function validateDesktopAcceptance(reportFile, release, platform) {
     requireValue(evidence.has(kind), `Missing real acceptance evidence: ${kind}`);
   const trace = JSON.parse(evidence.get("conversation-trace").toString());
   requireValue(Array.isArray(trace) && trace.every((event, index) => event.sequence === index + 1), "Conversation evidence must have an ordered trace");
+  const controls = release.manifest?.conversation?.recordingControls === "record-and-replay";
+  const reported = phase => trace.find(event => event.kind === "user" && event.phase === phase);
   let last = 0;
-  for (const phase of ["invoke", "start", "stop", "generate", "trial"]) {
+  const phases = ["invoke", "start", "stop", "generate", "trial"].filter(phase =>
+    !controls || !["invoke", "generate"].includes(phase) || reported(phase));
+  for (const phase of phases) {
     const event = trace.find(event => event.kind === "user" && event.phase === phase);
     requireValue(event && event.sequence > last && typeof event.messageId === "string" && event.messageId, `Missing separate user request: ${phase}`);
     last = event.sequence;
   }
   requireValue(trace.some(event => event.kind === "model" && event.provider && event.model && event.requestId), "Model request provenance is missing");
-  const request = phase => trace.find(event => event.kind === "user" && event.phase === phase).sequence;
+  const request = phase => (reported(phase) ?? (controls && phase === "generate" ? reported("stop") : undefined))?.sequence;
   const calls = trace.filter(event => event.kind === "tool" && event.pluginId === "teach-mode");
-  requireValue(calls.some(event => event.capabilityId === "record_and_replay" && event.input?.action === "start" && event.input.consent === true
+  requireValue(calls.some(event => event.capabilityId === "record_and_replay" && event.input?.action === "start" && (event.input.consent === true || controls)
     && event.sequence > request("start") && event.sequence < request("stop")), "Recording did not follow the explicit start request");
   requireValue(calls.every(event => event.input?.action !== "start" || event.sequence > request("start")), "Recording began during invocation");
-  requireValue(calls.some(event => event.capabilityId === "record_and_replay" && event.input?.action === "stop" && event.sequence > request("stop") && event.sequence < request("generate")), "Stop evidence is missing");
+  const stopped = calls.find(event => event.capabilityId === "record_and_replay" && event.input?.action === "stop" && event.sequence > request("stop"));
+  requireValue(stopped && (controls || stopped.sequence < request("generate")), "Stop evidence is missing");
   requireValue(calls.some(event => event.capabilityId === "create_skill" && event.input?.action === "save" && event.sequence > request("generate") && event.sequence < request("trial"))
-    && calls.every(event => event.capabilityId !== "create_skill" || event.sequence > request("generate")), "Generation was not a separate request");
+    && calls.every(event => event.capabilityId !== "create_skill" || event.sequence > Math.max(request("generate"), stopped.sequence)), "Generation must follow completion");
   const boundaries = JSON.parse(evidence.get("capture-boundaries").toString());
   requireValue(boundaries.source === "computer-history/native" && boundaries.checkpoints?.start?.complete === true && boundaries.checkpoints?.stop?.complete === true
     && boundaries.eventCount > 0 && boundaries.eventsSha256 === sha256(evidence.get("capture-events")), "Real capture boundaries or event snapshot hash are unconfirmed");
